@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, Timestamp, updateDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import Chatbot from "@/components/Chatbot";
@@ -43,8 +43,76 @@ const ClientDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [expirationWarning, setExpirationWarning] = useState<string>('');
 
-  // Fetch client data automatically - using useCallback to prevent infinite re-renders
-  const fetchClientData = useCallback(async () => {
+  // Calculate days remaining
+  const calculateDaysRemaining = (expiryDate: Timestamp): number => {
+    const now = new Date();
+    const expiry = expiryDate.toDate();
+    const diffTime = expiry.getTime() - now.getTime();
+    const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return daysRemaining > 0 ? daysRemaining : 0;
+  };
+
+  // Check expiration warning
+  const checkExpirationWarning = (membership: Membership) => {
+    const daysRemaining = calculateDaysRemaining(membership.expiryDate);
+    
+    if (daysRemaining <= 0) {
+      setExpirationWarning('❌ YOUR MEMBERSHIP HAS EXPIRED! Please renew to continue accessing gym facilities.');
+    } else if (daysRemaining <= 3) {
+      setExpirationWarning(`⚠️ URGENT: Your membership expires in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}! Renew now to avoid interruption.`);
+    } else if (daysRemaining <= 7) {
+      setExpirationWarning(`📅 Reminder: Your membership expires in ${daysRemaining} days. Consider renewing soon.`);
+    } else if (daysRemaining <= 15) {
+      setExpirationWarning(`ℹ️ Your membership has ${daysRemaining} days remaining. Plan your renewal.`);
+    }
+  };
+
+  // Update membership status in Firestore
+  const updateMembershipStatus = async (membershipId: string, status: MembershipStatus) => {
+    try {
+      const membershipRef = doc(db, 'monthlyMemberships', membershipId);
+      await updateDoc(membershipRef, {
+        status: status
+      });
+      
+      setActiveMembership(prev => prev ? { ...prev, status } : null);
+    } catch (error) {
+      console.error('Error updating membership status:', error);
+    }
+  };
+
+  // Calculate progress percentage for membership
+  const calculateMembershipProgress = (startDate: Timestamp, expiryDate: Timestamp): number => {
+    const start = startDate.toDate().getTime();
+    const expiry = expiryDate.toDate().getTime();
+    const now = new Date().getTime();
+    
+    const totalDuration = expiry - start;
+    const elapsed = now - start;
+    
+    const progress = (elapsed / totalDuration) * 100;
+    return Math.min(Math.max(progress, 0), 100);
+  };
+
+  // Format date for display
+  const formatDate = (timestamp: Timestamp): string => {
+    return timestamp.toDate().toLocaleDateString('en-PH', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  // Get expiration status color
+  const getExpirationColor = (daysRemaining: number): string => {
+    if (daysRemaining <= 0) return '#dc3545'; // Red for expired
+    if (daysRemaining <= 3) return '#ffc107'; // Yellow for urgent
+    if (daysRemaining <= 7) return '#fd7e14'; // Orange for warning
+    return '#28a745'; // Green for good
+  };
+
+  // Fetch client data automatically
+  const fetchClientData = async () => {
     setLoading(true);
     setExpirationWarning('');
     
@@ -112,80 +180,13 @@ const ClientDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  // Check expiration warning
-  const checkExpirationWarning = (membership: Membership) => {
-    const daysRemaining = calculateDaysRemaining(membership.expiryDate);
-    
-    if (daysRemaining <= 0) {
-      setExpirationWarning('❌ YOUR MEMBERSHIP HAS EXPIRED! Please renew to continue accessing gym facilities.');
-    } else if (daysRemaining <= 3) {
-      setExpirationWarning(`⚠️ URGENT: Your membership expires in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}! Renew now to avoid interruption.`);
-    } else if (daysRemaining <= 7) {
-      setExpirationWarning(`📅 Reminder: Your membership expires in ${daysRemaining} days. Consider renewing soon.`);
-    } else if (daysRemaining <= 15) {
-      setExpirationWarning(`ℹ️ Your membership has ${daysRemaining} days remaining. Plan your renewal.`);
-    }
-  };
-
-  // Update membership status in Firestore
-  const updateMembershipStatus = async (membershipId: string, status: MembershipStatus) => {
-    try {
-      const membershipRef = doc(db, 'monthlyMemberships', membershipId);
-      await updateDoc(membershipRef, {
-        status: status
-      });
-      
-      setActiveMembership(prev => prev ? { ...prev, status } : null);
-    } catch (error) {
-      console.error('Error updating membership status:', error);
-    }
-  };
-
-  // Calculate days remaining
-  const calculateDaysRemaining = (expiryDate: Timestamp): number => {
-    const now = new Date();
-    const expiry = expiryDate.toDate();
-    const diffTime = expiry.getTime() - now.getTime();
-    const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return daysRemaining > 0 ? daysRemaining : 0;
-  };
-
-  // Calculate progress percentage for membership
-  const calculateMembershipProgress = (startDate: Timestamp, expiryDate: Timestamp): number => {
-    const start = startDate.toDate().getTime();
-    const expiry = expiryDate.toDate().getTime();
-    const now = new Date().getTime();
-    
-    const totalDuration = expiry - start;
-    const elapsed = now - start;
-    
-    const progress = (elapsed / totalDuration) * 100;
-    return Math.min(Math.max(progress, 0), 100);
-  };
-
-  // Format date for display
-  const formatDate = (timestamp: Timestamp): string => {
-    return timestamp.toDate().toLocaleDateString('en-PH', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
-
-  // Get expiration status color
-  const getExpirationColor = (daysRemaining: number): string => {
-    if (daysRemaining <= 0) return '#dc3545'; // Red for expired
-    if (daysRemaining <= 3) return '#ffc107'; // Yellow for urgent
-    if (daysRemaining <= 7) return '#fd7e14'; // Orange for warning
-    return '#28a745'; // Green for good
   };
 
   // Check expiration on component mount
   useEffect(() => {
     fetchClientData();
-  }, [fetchClientData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Check membership expiration periodically
   useEffect(() => {

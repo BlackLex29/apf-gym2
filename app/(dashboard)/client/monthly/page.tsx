@@ -172,9 +172,9 @@ const MonthlyMembershipForm: React.FC = () => {
         // Remove paymentDate field entirely since it's not set yet
       };
 
-      // Remove undefined fields before saving
+      // Remove undefined fields before saving - FIXED: Remove the unused underscore parameter
       const cleanMembershipData = Object.fromEntries(
-        Object.entries(membershipData).filter(([_, value]) => value !== undefined)
+        Object.entries(membershipData).filter(([key, value]) => value !== undefined)
       );
 
       console.log('Saving membership data:', cleanMembershipData);
@@ -1389,4 +1389,4 @@ const MonthlyMembershipForm: React.FC = () => {
   );
 };
 
-export default MonthlyMembershipForm; 
+export default MonthlyMembershipForm;
