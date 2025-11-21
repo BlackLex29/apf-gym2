@@ -88,7 +88,7 @@ const MonthlyMembershipForm: React.FC = () => {
   const calculateMembershipDates = () => {
     const startDate = new Date();
     const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 30);
+ expiryDate.setDate(expiryDate.getDate() + 30);
     
     return {
       startDate,
@@ -172,9 +172,9 @@ const MonthlyMembershipForm: React.FC = () => {
         // Remove paymentDate field entirely since it's not set yet
       };
 
-      // Remove undefined fields before saving - FIXED: Remove the unused underscore parameter
+      // Remove undefined fields before saving - FIXED: Remove the unused key parameter
       const cleanMembershipData = Object.fromEntries(
-        Object.entries(membershipData).filter(([key, value]) => value !== undefined)
+        Object.entries(membershipData).filter(([, value]) => value !== undefined)
       );
 
       console.log('Saving membership data:', cleanMembershipData);
