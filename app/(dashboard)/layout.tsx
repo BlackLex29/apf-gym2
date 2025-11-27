@@ -1,5 +1,4 @@
-"use client"
-
+"use client";
 import { useState, useEffect } from 'react'
 import { User } from 'firebase/auth'
 import { useRouter, usePathname } from 'next/navigation'
@@ -40,6 +39,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [user, setUser] = useState<User | null>(null)
   const [userRole, setUserRole] = useState<'admin' | 'client' | 'coach' | null>(null)
   const [loading, setLoading] = useState(true)
+  const [authChecked, setAuthChecked] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
 
@@ -48,7 +48,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     try {
       console.log("🔍 [AUTH] Fetching user data for:", userId)
       
-      // Try users collection first
+      // Try users collection first (for admin and client roles)
       const userDoc = await getDoc(doc(db, 'users', userId))
       if (userDoc.exists()) {
         const userData = userDoc.data()
@@ -56,17 +56,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         return { role: userData.role, data: userData }
       }
       
-      // If not found in users, try coaches collection
+      console.log("🔍 [AUTH] Not found in users collection, checking coaches...")
+      
+      // Try query by authUid field in users collection for coaches
       const coachesQuery = query(
-        collection(db, 'coaches'),
-        where('authUid', '==', userId)
+        collection(db, 'users'),
+        where('authUid', '==', userId),
+        where('role', '==', 'coach')
       )
+      
       const coachesSnapshot = await getDocs(coachesQuery)
+      console.log("🔍 [AUTH] Coaches query returned:", coachesSnapshot.size, "documents")
       
       if (!coachesSnapshot.empty) {
         const coachDoc = coachesSnapshot.docs[0]
         const coachData = coachDoc.data()
-        console.log("✅ [AUTH] Found in coaches collection: coach")
+        console.log("✅ [AUTH] Found coach in users collection:", coachData)
         return { role: 'coach', data: coachData }
       }
       
@@ -74,7 +79,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       return null
       
     } catch (error) {
-      console.error('Error fetching user data:', error)
+      console.error('❌ [AUTH] Error fetching user data:', error)
       return null
     }
   }
@@ -103,32 +108,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             const shouldRedirect = 
               // If user is on login page but already authenticated
               pathname === '/login' ||
-              // If user is on public route but should be on dashboard
-              (PUBLIC_ROUTES.includes(pathname) && pathname !== '/') ||
+              // If user is on register page but already authenticated
+              pathname === '/register' ||
               // If user is on wrong role dashboard
-              (role === 'coach' && !pathname.startsWith('/kowts') && pathname !== '/') ||
-              (role === 'admin' && !pathname.startsWith('/admin') && pathname !== '/') ||
-              (role === 'client' && !pathname.startsWith('/client') && pathname !== '/')
+              (role === 'coach' && !pathname.startsWith('/kowts')) ||
+              (role === 'admin' && !pathname.startsWith('/admin')) ||
+              (role === 'client' && !pathname.startsWith('/client'))
 
-            if (shouldRedirect && pathname !== userDashboardPath) {
+            if (shouldRedirect) {
               console.log(`🔄 [AUTH] Redirecting ${role} from ${pathname} to: ${userDashboardPath}`)
               router.push(userDashboardPath)
-              return // Important: return early to prevent further processing
             }
           } else {
             setUserRole(null)
             console.log("❌ [AUTH] User document not found in any collection")
-            
-            // Don't auto-logout, just show access denied
-            // await auth.signOut()
-            // router.push('/login')
+            // If user data not found, sign them out
+            await auth.signOut()
+            router.push('/login')
           }
         } catch (error) {
-          console.error('Error fetching user role:', error)
+          console.error('❌ [AUTH] Error fetching user role:', error)
           setUserRole(null)
-          // Don't auto-logout on error
-          // await auth.signOut()
-          // router.push('/login')
         }
       } else {
         setUser(null)
@@ -140,12 +140,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           pathname.startsWith(route)
         )
 
-        if (isAccessingProtectedRoute && pathname !== '/login') {
+        if (isAccessingProtectedRoute) {
           console.log("🔄 [AUTH] Redirecting to login from protected route")
           router.push('/login')
         }
       }
       
+      setAuthChecked(true)
       setLoading(false)
     })
 
@@ -170,8 +171,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return false
   }
 
-  // Show loading state
-  if (loading) {
+  // Show loading state only during initial auth check
+  if (loading && !authChecked) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
@@ -241,7 +242,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     )
   }
 
-  // If user is on a public route, don&apos;t show dashboard layout
+  // If user is on a public route, don't show dashboard layout
   const isPublicRoute = PUBLIC_ROUTES.some(route => 
     pathname === route || pathname.startsWith(route + '/')
   )

@@ -4,7 +4,7 @@ import { collection, getDocs, query, where, orderBy, Timestamp, doc, getDoc } fr
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/hooks/useAuth';
 
-// Type definitions ehehehhehehehhehe
+// Type definitions
 type SessionType = 'personal_training' | 'group_training' | 'consultation' | 'assessment';
 type SessionStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
 type PaymentStatus = 'pending' | 'paid' | 'refunded';
@@ -225,7 +225,7 @@ const CoachDashboard: React.FC = () => {
     return `${session.startTime} - ${session.endTime}`;
   };
 
-  // Calculate today&apos;s earnings
+  // Calculate today's earnings
   const getTodayEarnings = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -304,7 +304,7 @@ const CoachDashboard: React.FC = () => {
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {/* Today&apos;s Sessions */}
+          {/* Today's Sessions */}
           <div className="bg-card rounded-xl shadow-sm p-6 border border-border">
             <div className="flex items-center">
               <div className="p-3 bg-blue-100 dark:bg-blue-900/20 rounded-xl">
@@ -323,7 +323,7 @@ const CoachDashboard: React.FC = () => {
             </div>
           </div>
 
-          {/* Today&apos;s Earnings */}
+          {/* Today's Earnings */}
           <div className="bg-card rounded-xl shadow-sm p-6 border border-border">
             <div className="flex items-center">
               <div className="p-3 bg-green-100 dark:bg-green-900/20 rounded-xl">
@@ -475,7 +475,7 @@ const CoachDashboard: React.FC = () => {
                         </div>
                       </div>
                       
-                      {/* Quick Actions for Today&apos;s Sessions */}
+                      {/* Quick Actions for Today's Sessions */}
                       {activeTab === 'today' && session.status === 'scheduled' && (
                         <div className="mt-3 pt-3 border-t border-border flex space-x-2">
                           <button
