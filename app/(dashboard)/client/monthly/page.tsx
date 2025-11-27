@@ -23,7 +23,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
-  SelectContent, ////
+  SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -520,16 +520,24 @@ const MonthlyMembershipForm: React.FC = () => {
             </AlertDescription>
           </Alert>
 
+          {/* CLICKABLE MEMBERSHIP CARDS */}
           <div className="grid md:grid-cols-2 gap-6 mt-6">
-            <Card
-              className={
-                formData.userType === "regular" ? "ring-2 ring-primary" : ""
-              }
+            <Card 
+              className={`
+                cursor-pointer transition-all duration-200 
+                ${formData.userType === "regular" 
+                  ? "ring-2 ring-primary bg-primary/5" 
+                  : "hover:bg-accent/50"}
+              `}
+              onClick={() => handleSelectChange("userType", "regular")}
             >
               <CardContent className="pt-6">
-                <h3 className="font-semibold text-lg mb-2">
-                  Regular Membership
-                </h3>
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="font-semibold text-lg">Regular Membership</h3>
+                  {formData.userType === "regular" && (
+                    <div className="w-3 h-3 bg-primary rounded-full"></div>
+                  )}
+                </div>
                 <div className="text-3xl font-bold text-primary mb-2">
                   ₱1,200
                 </div>
@@ -544,15 +552,22 @@ const MonthlyMembershipForm: React.FC = () => {
               </CardContent>
             </Card>
 
-            <Card
-              className={
-                formData.userType === "student" ? "ring-2 ring-primary" : ""
-              }
+            <Card 
+              className={`
+                cursor-pointer transition-all duration-200 
+                ${formData.userType === "student" 
+                  ? "ring-2 ring-primary bg-primary/5" 
+                  : "hover:bg-accent/50"}
+              `}
+              onClick={() => handleSelectChange("userType", "student")}
             >
               <CardContent className="pt-6">
-                <h3 className="font-semibold text-lg mb-2">
-                  Student Membership
-                </h3>
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="font-semibold text-lg">Student Membership</h3>
+                  {formData.userType === "student" && (
+                    <div className="w-3 h-3 bg-primary rounded-full"></div>
+                  )}
+                </div>
                 <div className="text-3xl font-bold text-primary mb-2">
                   ₱1,000
                 </div>
@@ -643,55 +658,29 @@ const MonthlyMembershipForm: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Membership Type */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">🎯 Membership Type</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <RadioGroup
-                  value={formData.userType}
-                  onValueChange={(value: UserType) =>
-                    handleSelectChange("userType", value)
-                  }
-                  className="space-y-4"
-                >
-                  <div className="flex items-center space-x-3 p-4 border rounded-lg">
-                    <RadioGroupItem value="regular" id="regular" />
-                    <Label htmlFor="regular" className="flex-1 cursor-pointer">
-                      <div>
-                        <strong>Regular Membership</strong>
-                        <p className="text-muted-foreground">
-                          ₱1,200 per month
-                        </p>
-                      </div>
-                    </Label>
+            {/* Student ID Field (Only shows when Student is selected) */}
+            {formData.userType === "student" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">🎓 Student Information</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <Label htmlFor="studentId">Student ID (Optional)</Label>
+                    <Input
+                      id="studentId"
+                      name="studentId"
+                      value={formData.studentId}
+                      onChange={handleInputChange}
+                      placeholder="Enter your student ID"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Providing your student ID helps us verify your student status.
+                    </p>
                   </div>
-
-                  <div className="flex items-center space-x-3 p-4 border rounded-lg">
-                    <RadioGroupItem value="student" id="student" />
-                    <Label htmlFor="student" className="flex-1 cursor-pointer">
-                      <div>
-                        <strong>Student Membership</strong>
-                        <p className="text-muted-foreground">
-                          ₱1,000 per month
-                        </p>
-                        {formData.userType === "student" && (
-                          <div className="mt-2">
-                            <Input
-                              name="studentId"
-                              value={formData.studentId}
-                              onChange={handleInputChange}
-                              placeholder="Student ID (Optional)"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </Label>
-                  </div>
-                </RadioGroup>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Emergency Contact */}
             <Card>
@@ -780,21 +769,41 @@ const MonthlyMembershipForm: React.FC = () => {
               <CardContent>
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="paymentMethod">Please proceed to the cashier.</Label>
-                    <div className="p-3 border border-border rounded-md bg-muted/50">
-                      <span className="font-medium">Cash (In-person)</span>
-                    </div>
-                    <input
-                      type="hidden"
-                      name="paymentMethod"
-                      value="cash"
-                      onChange={(e) =>
-                        handleSelectChange("paymentMethod", e.target.value)
+                    <Label htmlFor="paymentMethod">Select Payment Method *</Label>
+                    <Select
+                      value={formData.paymentMethod}
+                      onValueChange={(value: PaymentMethod) => 
+                        handleSelectChange("paymentMethod", value)
                       }
-                    />
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select payment method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cash">
+                          <div className="flex items-center space-x-2">
+                            <span>💵 Cash (In-person)</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="gcash">
+                          <div className="flex items-center space-x-2">
+                            <span>📱 GCash</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="bank_transfer">
+                          <div className="flex items-center space-x-2">
+                            <span>🏦 Bank Transfer</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
                     <p className="text-xs text-muted-foreground">
-                      Please bring exact amount to the gym reception. Payment
-                      should be made before accessing facilities.
+                      {formData.paymentMethod === "cash" && 
+                        "Please bring exact amount to the gym reception. Payment should be made before accessing facilities."}
+                      {formData.paymentMethod === "gcash" && 
+                        "Complete GCash payment using the instructions provided after form submission."}
+                      {formData.paymentMethod === "bank_transfer" && 
+                        "Bank account details will be provided after form submission. Email deposit slip for verification."}
                     </p>
                   </div>
 
@@ -804,52 +813,38 @@ const MonthlyMembershipForm: React.FC = () => {
                         Payment Instructions:
                       </h4>
                       {formData.paymentMethod === "cash" && (
-                        <p>
-                          Please bring exact amount to the gym reception.
-                          Payment should be made before accessing facilities.
-                        </p>
+                        <div className="space-y-2">
+                          <p><strong>Cash Payment Process:</strong></p>
+                          <div className="bg-background p-3 rounded space-y-1 text-sm">
+                            <p>💰 Amount: <strong>₱{monthlyPrice}</strong></p>
+                            <p>📍 Location: Gym Reception Counter</p>
+                            <p>⏰ Payment: Before accessing facilities</p>
+                          </div>
+                          <p className="text-sm">
+                            Please bring exact amount to avoid delays in processing.
+                          </p>
+                        </div>
                       )}
                       {formData.paymentMethod === "gcash" && (
                         <div className="space-y-2">
-                          <p>
-                            <strong>GCash Payment Process:</strong>
-                          </p>
+                          <p><strong>GCash Payment Process:</strong></p>
                           <div className="bg-background p-3 rounded space-y-1 text-sm">
-                            <p>
-                              📱 Send to:{" "}
-                              <strong>{gcashReferences.number}</strong>
-                            </p>
-                            <p>
-                              💳 Amount: <strong>₱{monthlyPrice}</strong>
-                            </p>
-                            <p>
-                              🏢 Account:{" "}
-                              <strong>{gcashReferences.name}</strong>
-                            </p>
+                            <p>📱 Send to: <strong>{gcashReferences.number}</strong></p>
+                            <p>💳 Amount: <strong>₱{monthlyPrice}</strong></p>
+                            <p>🏢 Account: <strong>{gcashReferences.name}</strong></p>
                           </div>
                           <p className="text-sm text-muted-foreground">
-                            Complete payment instructions will be shown after
-                            form submission
+                            Complete payment instructions will be shown after form submission
                           </p>
                         </div>
                       )}
                       {formData.paymentMethod === "bank_transfer" && (
                         <div className="space-y-2 text-sm">
-                          <p>
-                            <strong>Bank Transfer Process:</strong>
-                          </p>
+                          <p><strong>Bank Transfer Process:</strong></p>
                           <p>1. Submit this application form</p>
-                          <p>
-                            2. Check your email for our bank account details
-                          </p>
-                          <p>
-                            3. Make transfer and email the deposit slip to our
-                            official email
-                          </p>
-                          <p>
-                            4. Your membership will be activated upon payment
-                            verification
-                          </p>
+                          <p>2. Check your email for our bank account details</p>
+                          <p>3. Make transfer and email the deposit slip to our official email</p>
+                          <p>4. Your membership will be activated upon payment verification</p>
                         </div>
                       )}
                     </CardContent>
@@ -933,58 +928,7 @@ const MonthlyMembershipForm: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Active Memberships Display */}
-      {activeMemberships.length > 0 && (
-        <Card className="mt-8">
-          <CardHeader>
-            <CardTitle>📊 Recent Memberships</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {activeMemberships.map((membership) => (
-                <Card key={membership.id} className="p-4">
-                  <div className="flex justify-between items-start mb-3">
-                    <strong className="text-sm">
-                      {membership.firstName} {membership.lastName}
-                    </strong>
-                    <Badge
-                      variant={getMembershipStatusVariant(membership.status)}
-                    >
-                      {membership.status.replace("_", " ")}
-                    </Badge>
-                  </div>
-                  <div className="space-y-1 text-xs text-muted-foreground">
-                    <div>ID: {membership.membershipId}</div>
-                    <div>Email: {membership.email}</div>
-                    <div>
-                      Type: {membership.userType} - ₱{membership.monthlyPrice}
-                    </div>
-                    <div>
-                      Start:{" "}
-                      {membership.startDate
-                        .toDate()
-                        .toLocaleDateString("en-PH")}
-                    </div>
-                    <div>
-                      Expires:{" "}
-                      {membership.expiryDate
-                        .toDate()
-                        .toLocaleDateString("en-PH")}
-                    </div>
-                    {membership.status === "active" && (
-                      <div className="bg-success/20 p-1 rounded text-center font-semibold">
-                        Days Left:{" "}
-                        {calculateDaysRemaining(membership.expiryDate)}
-                      </div>
-                    )}
-                    <div>Payment: {membership.paymentMethod}</div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* REMOVED: Active Memberships Display - HINDI NA ITO IPAPAKITA */}
 
       {/* Chatbot Component */}
       <Chatbot />
