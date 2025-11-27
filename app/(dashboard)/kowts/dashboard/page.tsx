@@ -4,7 +4,7 @@ import { collection, getDocs, query, where, orderBy, Timestamp, doc, getDoc } fr
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/hooks/useAuth';
 
-// Type definitions
+// Type definitions ehehehhehehehhehe
 type SessionType = 'personal_training' | 'group_training' | 'consultation' | 'assessment';
 type SessionStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
 type PaymentStatus = 'pending' | 'paid' | 'refunded';
