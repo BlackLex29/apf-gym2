@@ -578,7 +578,7 @@ const ClientDashboard: React.FC = () => {
                       You don&apos;t have an active gym membership yet.
                     </p>
                     <a 
-                      href="/monthly" 
+                      href="/client/monthly" 
                       className="bg-primary text-primary-foreground px-6 py-3 rounded-md font-semibold hover:bg-primary/90 transition-colors inline-block"
                     >
                       Get Started with Monthly Membership
