@@ -4,8 +4,6 @@ import * as React from "react";
 import {
   IconChartBar,
   IconDashboard,
-  IconHelp,
-  IconSearch,
   IconSettings,
   IconUsers,
   IconCalendar,
@@ -16,6 +14,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -25,9 +24,13 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Moon, Sun, LogOut, User, Monitor } from "lucide-react";
+import { useTheme } from "next-themes";
 
 type UserRole = "admin" | "client" | "coach";
 
@@ -44,6 +47,7 @@ interface UserData {
   avatar: string;
   photoURL?: string;
   role?: UserRole;
+  theme?: "light" | "dark" | "system";
 }
 
 // Route permission configuration
@@ -167,6 +171,109 @@ const getRedirectPath = (userRole: UserRole): string => {
   }
 };
 
+// Theme Toggle Component - FIXED VERSION
+const ThemeToggle = ({ userId }: { userId?: string }) => {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  // Fixed: Use useEffect properly without direct setState
+  useEffect(() => {
+    // Use requestAnimationFrame to avoid synchronous state updates
+    const timer = requestAnimationFrame(() => {
+      setMounted(true);
+    });
+    
+    return () => cancelAnimationFrame(timer);
+  }, []);
+
+  const handleThemeChange = async (newTheme: "light" | "dark" | "system") => {
+    setTheme(newTheme);
+    
+    // Save theme preference to Firestore if user is logged in
+    if (userId && auth.currentUser) {
+      try {
+        await updateDoc(doc(db, "users", userId), {
+          theme: newTheme,
+          updatedAt: new Date(),
+        });
+      } catch (error) {
+        console.error("Error saving theme preference:", error);
+      }
+    }
+  };
+
+  if (!mounted) {
+    return (
+      <div className="flex items-center justify-between p-3 rounded-lg border bg-card">
+        <div className="flex items-center gap-3">
+          <div className="w-4 h-4 bg-muted rounded animate-pulse"></div>
+          <div className="text-sm font-medium">Theme</div>
+        </div>
+        <div className="w-10 h-6 bg-muted rounded-full animate-pulse"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between p-3 rounded-lg border bg-card">
+        <div className="flex items-center gap-3">
+          {theme === "dark" ? (
+            <Moon className="h-4 w-4 text-yellow-500" />
+          ) : theme === "light" ? (
+            <Sun className="h-4 w-4 text-orange-500" />
+          ) : (
+            <Monitor className="h-4 w-4 text-blue-500" />
+          )}
+          <div>
+            <p className="text-sm font-medium">Theme</p>
+            <p className="text-xs text-muted-foreground capitalize">
+              {theme} mode
+            </p>
+          </div>
+        </div>
+        <Switch
+          checked={theme === "dark"}
+          onCheckedChange={(checked) => 
+            handleThemeChange(checked ? "dark" : "light")
+          }
+        />
+      </div>
+      
+      {/* Theme Options */}
+      <div className="flex gap-1 p-1 rounded-lg bg-muted/50">
+        <Button
+          variant={theme === "light" ? "default" : "ghost"}
+          size="sm"
+          className="flex-1 h-8 text-xs"
+          onClick={() => handleThemeChange("light")}
+        >
+          <Sun className="h-3 w-3 mr-1" />
+          Light
+        </Button>
+        <Button
+          variant={theme === "dark" ? "default" : "ghost"}
+          size="sm"
+          className="flex-1 h-8 text-xs"
+          onClick={() => handleThemeChange("dark")}
+        >
+          <Moon className="h-3 w-3 mr-1" />
+          Dark
+        </Button>
+        <Button
+          variant={theme === "system" ? "default" : "ghost"}
+          size="sm"
+          className="flex-1 h-8 text-xs"
+          onClick={() => handleThemeChange("system")}
+        >
+          <Monitor className="h-3 w-3 mr-1" />
+          Auto
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 // Custom hook for route protection
 export function useRouteProtection() {
   const router = useRouter();
@@ -174,6 +281,7 @@ export function useRouteProtection() {
   const [isChecking, setIsChecking] = useState(true);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [user, setUser] = useState<UserData | null>(null);
+  const { setTheme } = useTheme();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -181,7 +289,8 @@ export function useRouteProtection() {
         // User is not authenticated, redirect to login
         setUser(null);
         setUserRole(null);
-        setIsChecking(false);
+        // Fixed: Use setTimeout to avoid synchronous state updates in effect
+        setTimeout(() => setIsChecking(false), 0);
         router.push("/login");
         return;
       }
@@ -190,14 +299,19 @@ export function useRouteProtection() {
       try {
         const userDoc = await getDoc(doc(db, "users", currentUser.uid));
         if (userDoc.exists()) {
-          const data = userDoc.data() as UserData & { role?: string };
+          const data = userDoc.data() as UserData & { role?: string; theme?: string };
           const role = (data?.role as UserRole) || "client";
+          const userTheme = (data?.theme as "light" | "dark" | "system") || "system";
+          
           setUserRole(role);
+          // Set the theme from user preference
+          setTheme(userTheme);
           setUser({
             name: data.name || currentUser.displayName || "GymSchedPro User",
             email: currentUser.email || "user@example.com",
             avatar: data.photoURL || "/avatars/default.jpg",
             role: role,
+            theme: userTheme,
           });
 
           // Check if current path is accessible for the user role
@@ -209,26 +323,37 @@ export function useRouteProtection() {
             );
             router.push(redirectPath);
           } else {
-            setIsChecking(false);
+            // Fixed: Use setTimeout to avoid synchronous state updates in effect
+            setTimeout(() => setIsChecking(false), 0);
           }
         } else {
           setUserRole("client");
-          setIsChecking(false);
+          setTimeout(() => setIsChecking(false), 0);
         }
       } catch (error) {
         console.error("Error fetching user role:", error);
         setUserRole("client");
-        setIsChecking(false);
+        setTimeout(() => setIsChecking(false), 0);
       }
     });
 
     return () => unsubscribe();
-  }, [router, pathname]);
+  }, [router, pathname, setTheme]);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      router.push("/login");
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
 
   return {
     isChecking,
     userRole,
     user,
+    handleLogout,
     hasAccessToPath: userRole
       ? (path: string) => hasAccessToPath(userRole, path)
       : () => false,
@@ -288,27 +413,11 @@ export function AppSidebar({
   userRole: propUserRole,
   ...props
 }: AppSidebarProps) {
-  const { userRole: hookUserRole, user } = useRouteProtection();
+  const { userRole: hookUserRole, user, handleLogout } = useRouteProtection();
   const userRole = propUserRole?.role || hookUserRole || "client";
-  const userId = propUserRole?.userId || user?.email || "unknown";
 
   const navMain = getNavData(userRole);
-  const router = useRouter();
   const pathname = usePathname();
-
-  // Function to handle navigation with permission check
-  const handleNavigation = (url: string, event?: React.MouseEvent) => {
-    if (event) {
-      event.preventDefault();
-    }
-
-    if (!hasAccessToPath(userRole, url)) {
-      alert("You don't have permission to access this page.");
-      return;
-    }
-
-    router.push(url);
-  };
 
   // Show loading state while checking auth
   if (!hookUserRole && !propUserRole) {
@@ -386,6 +495,39 @@ export function AppSidebar({
           })}
         </SidebarMenu>
       </SidebarContent>
+
+      {/* Footer with User Info, Theme Toggle, and Logout */}
+      <SidebarFooter>
+        <div className="space-y-3 p-2">
+          {/* User Info */}
+          {user && (
+            <div className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+              <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground">
+                <User className="h-4 w-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{user.name}</p>
+                <p className="text-xs text-muted-foreground truncate capitalize">
+                  {user.role}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Theme Toggle - FIXED */}
+          <ThemeToggle userId={user?.role ? auth.currentUser?.uid : undefined} />
+
+          {/* Logout Button */}
+          <Button
+            variant="outline"
+            onClick={handleLogout}
+            className="w-full border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Sign Out
+          </Button>
+        </div>
+      </SidebarFooter>
     </Sidebar>
   );
 }

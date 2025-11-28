@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import {
   multiFactor,
-  signOut,
   TotpMultiFactorGenerator,
   TotpSecret,
   User,
@@ -43,13 +42,8 @@ import {
   RefreshCw,
   User as UserIcon,
   Bell,
-  Palette,
-  LogOut,
-  Moon,
-  Sun,
   Key,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 
 // Type guards and interfaces
 interface MultiFactorUserExtended extends User {
@@ -69,7 +63,6 @@ interface UserProfile {
   smsNotifications?: boolean;
   language?: string;
   timezone?: string;
-  theme?: "light" | "dark" | "system";
 }
 
 interface FirebaseAuthError extends Error {
@@ -105,73 +98,7 @@ const getSecretKey = (secret: TotpSecret): string => {
   return "";
 };
 
-// Theme Toggle Component
-const ThemeToggle = ({
-  theme,
-  onThemeChange,
-  loading,
-}: {
-  theme: "light" | "dark" | "system";
-  onThemeChange: (theme: "light" | "dark" | "system") => void;
-  loading: boolean;
-}) => {
-  return (
-    <div className="flex items-center justify-between p-4 rounded-lg border bg-card">
-      <div className="flex items-center gap-3">
-        {theme === "dark" ? (
-          <Moon className="h-5 w-5 text-yellow-500" />
-        ) : theme === "light" ? (
-          <Sun className="h-5 w-5 text-orange-500" />
-        ) : (
-          <Palette className="h-5 w-5 text-blue-500" />
-        )}
-        <div>
-          <p className="font-medium">Theme</p>
-          <p className="text-sm text-muted-foreground">
-            {theme === "system"
-              ? "Follow system"
-              : `${theme.charAt(0).toUpperCase() + theme.slice(1)} mode`}
-          </p>
-        </div>
-      </div>
-      <Select
-        value={theme}
-        onValueChange={(value: "light" | "dark" | "system") =>
-          onThemeChange(value)
-        }
-        disabled={loading}
-      >
-        <SelectTrigger className="w-32">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="light">
-            <div className="flex items-center gap-2">
-              <Sun className="h-4 w-4" />
-              Light
-            </div>
-          </SelectItem>
-          <SelectItem value="dark">
-            <div className="flex items-center gap-2">
-              <Moon className="h-4 w-4" />
-              Dark
-            </div>
-          </SelectItem>
-          <SelectItem value="system">
-            <div className="flex items-center gap-2">
-              <Palette className="h-4 w-4" />
-              System
-            </div>
-          </SelectItem>
-        </SelectContent>
-      </Select>
-    </div>
-  );
-};
-
 export default function SettingsPage() {
-  const router = useRouter();
-
   /* ------------------------------------------------------------------ *
    *  Auth & user data
    * ------------------------------------------------------------------ */
@@ -213,7 +140,6 @@ export default function SettingsPage() {
    * ------------------------------------------------------------------ */
   const [language, setLanguage] = useState("en");
   const [timezone, setTimezone] = useState("asia/manila");
-  const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
 
   /* ------------------------------------------------------------------ *
    *  2FA (TOTP)
@@ -251,7 +177,6 @@ export default function SettingsPage() {
             setSmsNotifications(data.smsNotifications ?? false);
             setLanguage(data.language ?? "en");
             setTimezone(data.timezone ?? "asia/manila");
-            setTheme(data.theme ?? "system");
           }
         } catch (err: unknown) {
           console.error("Error loading user data:", err);
@@ -279,41 +204,6 @@ export default function SettingsPage() {
       console.error("Error checking 2FA status:", error);
     }
   };
-
-  /* ------------------------------------------------------------------ *
-   *  Apply theme to document
-   * ------------------------------------------------------------------ */
-  useEffect(() => {
-    const applyTheme = () => {
-      const root = window.document.documentElement;
-
-      // Remove existing theme classes
-      root.classList.remove("light", "dark");
-
-      if (theme === "system") {
-        const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
-          .matches
-          ? "dark"
-          : "light";
-        root.classList.add(systemTheme);
-      } else {
-        root.classList.add(theme);
-      }
-    };
-
-    applyTheme();
-
-    // Listen for system theme changes
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleChange = () => {
-      if (theme === "system") {
-        applyTheme();
-      }
-    };
-
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, [theme]);
 
   /* ------------------------------------------------------------------ *
    *  Helpers
@@ -460,23 +350,6 @@ export default function SettingsPage() {
     }
   };
 
-  const handleLogout = async () => {
-    setLoading(true);
-    clearMessages();
-    try {
-      await signOut(auth);
-      router.push("/login");
-    } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message ?? "Logout failed");
-      } else {
-        setError("Logout failed");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const saveProfile = async () => {
     if (!user) return;
     setLoading(true);
@@ -567,7 +440,6 @@ export default function SettingsPage() {
       await updateDoc(doc(db, "users", user.uid), {
         language,
         timezone,
-        theme,
       });
       setSuccess("Preferences saved successfully");
     } catch (err: unknown) {
@@ -581,23 +453,10 @@ export default function SettingsPage() {
     }
   };
 
-  const handleThemeChange = async (newTheme: "light" | "dark" | "system") => {
-    setTheme(newTheme);
-    if (user) {
-      try {
-        await updateDoc(doc(db, "users", user.uid), {
-          theme: newTheme,
-        });
-      } catch (err: unknown) {
-        console.error("Failed to save theme preference:", err);
-      }
-    }
-  };
-
   const reset2FAEnrollment = () => {
     setQrUrl(null);
     setTotpSecret(null);
-    setMultiFactorSession(null); // Add this line
+    setMultiFactorSession(null);
     setCode("");
     setEnrollmentStep("idle");
     clearMessages();
@@ -855,9 +714,6 @@ export default function SettingsPage() {
                   <Switch
                     checked={enrolled}
                     onCheckedChange={(checked) => {
-                      console.log("=== TOGGLE CLICKED ===");
-                      console.log("Checked:", checked);
-                      console.log("Enrolled:", enrolled);
                       if (checked) {
                         startEnrollment();
                       } else {
@@ -954,19 +810,11 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Palette className="h-5 w-5" />
                 Preferences
               </CardTitle>
               <CardDescription>Customize your experience</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Theme Toggle */}
-              <ThemeToggle
-                theme={theme}
-                onThemeChange={handleThemeChange}
-                loading={loading}
-              />
-
               <div className="space-y-1">
                 <label className="text-sm font-medium">Language</label>
                 <Select value={language} onValueChange={setLanguage}>
@@ -1005,34 +853,6 @@ export default function SettingsPage() {
                   </>
                 ) : (
                   "Save Preferences"
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Logout Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <LogOut className="h-5 w-5" />
-                Account Actions
-              </CardTitle>
-              <CardDescription>Sign out of your session</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button
-                variant="outline"
-                onClick={handleLogout}
-                disabled={loading}
-                className="w-full border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Signing out…
-                  </>
-                ) : (
-                  "Sign Out"
                 )}
               </Button>
             </CardContent>

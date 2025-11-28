@@ -102,7 +102,10 @@ const MonthlyMembershipForm: React.FC = () => {
   >([]);
   const [showGCashModal, setShowGCashModal] = useState(false);
 
-  // GCash References and Instructions
+  // FIXED: Online payment configuration - SET TO FALSE IF NO ONLINE PAYMENTS
+  const ONLINE_PAYMENTS_AVAILABLE = false; // CHANGE TO true IF YOU HAVE ONLINE PAYMENTS
+
+  // GCash References and Instructions (only used if online payments available)
   const gcashReferences = {
     number: "0917-123-4567",
     name: "GymSched Pro Fitness Center",
@@ -239,7 +242,9 @@ const MonthlyMembershipForm: React.FC = () => {
       !formData.firstName.trim() ||
       !formData.lastName.trim() ||
       !formData.email.trim() ||
-      !formData.phone.trim()
+      !formData.phone.trim() ||
+      !formData.emergencyContact.trim() ||
+      !formData.emergencyPhone.trim()
     ) {
       setSubmitMessage("❌ Please fill in all required fields.");
       return;
@@ -253,9 +258,8 @@ const MonthlyMembershipForm: React.FC = () => {
       const now = Timestamp.now();
       const { startDate, expiryDate } = calculateMembershipDates();
 
-      // Determine initial status based on payment method
-      const initialStatus: MembershipStatus =
-        formData.paymentMethod === "gcash" ? "payment_pending" : "pending";
+      // FIXED: Always set status to "pending" since we only accept cash payments
+      const initialStatus: MembershipStatus = "pending";
 
       // Create membership data WITHOUT undefined fields
       const membershipData: Omit<MembershipRecord, "id"> = {
@@ -286,15 +290,18 @@ const MonthlyMembershipForm: React.FC = () => {
 
       console.log("Membership saved with ID:", docRef.id);
 
-      // Show GCash modal if GCash payment method selected
-      if (formData.paymentMethod === "gcash") {
+      // FIXED: Only show GCash modal if online payments are available AND GCash is selected
+      if (ONLINE_PAYMENTS_AVAILABLE && formData.paymentMethod === "gcash") {
         setShowGCashModal(true);
       }
 
-      const paymentInstructions =
-        formData.paymentMethod === "gcash"
+      const paymentInstructions = ONLINE_PAYMENTS_AVAILABLE 
+        ? formData.paymentMethod === "gcash"
           ? " Please complete your GCash payment using the instructions provided."
-          : " Please proceed to the gym reception for cash payment.";
+          : formData.paymentMethod === "bank_transfer"
+          ? " Please complete your bank transfer and email the deposit slip for verification."
+          : " Please proceed to the gym reception for cash payment."
+        : " Please proceed to the gym reception for cash payment. Online payments are currently unavailable.";
 
       setSubmitMessage(
         `✅ Monthly membership application submitted! ` +
@@ -403,8 +410,8 @@ const MonthlyMembershipForm: React.FC = () => {
 
   return (
     <div className="container mx-auto p-4 max-w-6xl">
-      {/* GCash Payment Modal */}
-      {showGCashModal && (
+      {/* GCash Payment Modal - Only show if online payments available */}
+      {ONLINE_PAYMENTS_AVAILABLE && showGCashModal && (
         <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <CardHeader className="bg-primary text-primary-foreground">
@@ -511,6 +518,21 @@ const MonthlyMembershipForm: React.FC = () => {
           <p className="text-muted-foreground text-lg">
             Start Your Fitness Journey Today!
           </p>
+
+          {/* FIXED: Clear payment method alert */}
+          <Alert className={`mt-4 ${ONLINE_PAYMENTS_AVAILABLE ? 'bg-primary/5 border-primary/20' : 'bg-amber-50 border-amber-200'}`}>
+            <AlertDescription>
+              <strong>
+                {ONLINE_PAYMENTS_AVAILABLE 
+                  ? "✅ Online Payments Available" 
+                  : "ℹ️ Payment Information"}
+              </strong>
+              <br />
+              {ONLINE_PAYMENTS_AVAILABLE
+                ? "You can pay via GCash, Bank Transfer, or Cash at the gym."
+                : "Currently, we only accept CASH payments at the gym reception. Please proceed to the gym to complete your payment after submitting this form."}
+            </AlertDescription>
+          </Alert>
 
           {/* User Info Banner */}
           <Alert className="mt-4 bg-primary/5 border-primary/20">
@@ -780,30 +802,42 @@ const MonthlyMembershipForm: React.FC = () => {
                         <SelectValue placeholder="Select payment method" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="cash">
-                          <div className="flex items-center space-x-2">
-                            <span>💵 Cash (In-person)</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="gcash">
-                          <div className="flex items-center space-x-2">
-                            <span>📱 GCash</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="bank_transfer">
-                          <div className="flex items-center space-x-2">
-                            <span>🏦 Bank Transfer</span>
-                          </div>
-                        </SelectItem>
+                        {/* FIXED: Only show cash option if online payments not available */}
+                        {!ONLINE_PAYMENTS_AVAILABLE ? (
+                          <SelectItem value="cash">
+                            <div className="flex items-center space-x-2">
+                              <span>💵 Cash (In-person at Gym)</span>
+                            </div>
+                          </SelectItem>
+                        ) : (
+                          <>
+                            <SelectItem value="cash">
+                              <div className="flex items-center space-x-2">
+                                <span>💵 Cash (In-person)</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="gcash">
+                              <div className="flex items-center space-x-2">
+                                <span>📱 GCash</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="bank_transfer">
+                              <div className="flex items-center space-x-2">
+                                <span>🏦 Bank Transfer</span>
+                              </div>
+                            </SelectItem>
+                          </>
+                        )}
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      {formData.paymentMethod === "cash" && 
-                        "Please bring exact amount to the gym reception. Payment should be made before accessing facilities."}
-                      {formData.paymentMethod === "gcash" && 
-                        "Complete GCash payment using the instructions provided after form submission."}
-                      {formData.paymentMethod === "bank_transfer" && 
-                        "Bank account details will be provided after form submission. Email deposit slip for verification."}
+                      {!ONLINE_PAYMENTS_AVAILABLE 
+                        ? "Currently accepting CASH payments only. Please bring exact amount to the gym reception."
+                        : formData.paymentMethod === "cash" 
+                          ? "Please bring exact amount to the gym reception. Payment should be made before accessing facilities."
+                          : formData.paymentMethod === "gcash" 
+                            ? "Complete GCash payment using the instructions provided after form submission."
+                            : "Bank account details will be provided after form submission. Email deposit slip for verification."}
                     </p>
                   </div>
 
@@ -812,40 +846,57 @@ const MonthlyMembershipForm: React.FC = () => {
                       <h4 className="font-semibold mb-2">
                         Payment Instructions:
                       </h4>
-                      {formData.paymentMethod === "cash" && (
+                      {!ONLINE_PAYMENTS_AVAILABLE ? (
                         <div className="space-y-2">
-                          <p><strong>Cash Payment Process:</strong></p>
+                          <p><strong>Cash Payment Process (ONLY OPTION):</strong></p>
                           <div className="bg-background p-3 rounded space-y-1 text-sm">
                             <p>💰 Amount: <strong>₱{monthlyPrice}</strong></p>
                             <p>📍 Location: Gym Reception Counter</p>
-                            <p>⏰ Payment: Before accessing facilities</p>
+                            <p>⏰ Hours: 6:00 AM - 10:00 PM Daily</p>
+                            <p>📞 Contact: (02) 1234-5678</p>
                           </div>
-                          <p className="text-sm">
-                            Please bring exact amount to avoid delays in processing.
+                          <p className="text-sm text-amber-600 font-medium">
+                            Please bring exact amount. Your membership will be activated immediately upon payment.
                           </p>
                         </div>
-                      )}
-                      {formData.paymentMethod === "gcash" && (
-                        <div className="space-y-2">
-                          <p><strong>GCash Payment Process:</strong></p>
-                          <div className="bg-background p-3 rounded space-y-1 text-sm">
-                            <p>📱 Send to: <strong>{gcashReferences.number}</strong></p>
-                            <p>💳 Amount: <strong>₱{monthlyPrice}</strong></p>
-                            <p>🏢 Account: <strong>{gcashReferences.name}</strong></p>
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            Complete payment instructions will be shown after form submission
-                          </p>
-                        </div>
-                      )}
-                      {formData.paymentMethod === "bank_transfer" && (
-                        <div className="space-y-2 text-sm">
-                          <p><strong>Bank Transfer Process:</strong></p>
-                          <p>1. Submit this application form</p>
-                          <p>2. Check your email for our bank account details</p>
-                          <p>3. Make transfer and email the deposit slip to our official email</p>
-                          <p>4. Your membership will be activated upon payment verification</p>
-                        </div>
+                      ) : (
+                        <>
+                          {formData.paymentMethod === "cash" && (
+                            <div className="space-y-2">
+                              <p><strong>Cash Payment Process:</strong></p>
+                              <div className="bg-background p-3 rounded space-y-1 text-sm">
+                                <p>💰 Amount: <strong>₱{monthlyPrice}</strong></p>
+                                <p>📍 Location: Gym Reception Counter</p>
+                                <p>⏰ Payment: Before accessing facilities</p>
+                              </div>
+                              <p className="text-sm">
+                                Please bring exact amount to avoid delays in processing.
+                              </p>
+                            </div>
+                          )}
+                          {formData.paymentMethod === "gcash" && (
+                            <div className="space-y-2">
+                              <p><strong>GCash Payment Process:</strong></p>
+                              <div className="bg-background p-3 rounded space-y-1 text-sm">
+                                <p>📱 Send to: <strong>{gcashReferences.number}</strong></p>
+                                <p>💳 Amount: <strong>₱{monthlyPrice}</strong></p>
+                                <p>🏢 Account: <strong>{gcashReferences.name}</strong></p>
+                              </div>
+                              <p className="text-sm text-muted-foreground">
+                                Complete payment instructions will be shown after form submission
+                              </p>
+                            </div>
+                          )}
+                          {formData.paymentMethod === "bank_transfer" && (
+                            <div className="space-y-2 text-sm">
+                              <p><strong>Bank Transfer Process:</strong></p>
+                              <p>1. Submit this application form</p>
+                              <p>2. Check your email for our bank account details</p>
+                              <p>3. Make transfer and email the deposit slip to our official email</p>
+                              <p>4. Your membership will be activated upon payment verification</p>
+                            </div>
+                          )}
+                        </>
                       )}
                     </CardContent>
                   </Card>
@@ -874,11 +925,13 @@ const MonthlyMembershipForm: React.FC = () => {
                   <div className="flex justify-between">
                     <span>Payment Method:</span>
                     <span>
-                      {formData.paymentMethod === "cash" && "Cash (In-person)"}
-                      {formData.paymentMethod === "gcash" &&
-                        "GCash (Payment Pending)"}
-                      {formData.paymentMethod === "bank_transfer" &&
-                        "Bank Transfer (Payment Pending)"}
+                      {!ONLINE_PAYMENTS_AVAILABLE 
+                        ? "Cash (In-person at Gym)" 
+                        : formData.paymentMethod === "cash" 
+                          ? "Cash (In-person)"
+                          : formData.paymentMethod === "gcash" 
+                            ? "GCash (Payment Pending)"
+                            : "Bank Transfer (Payment Pending)"}
                     </span>
                   </div>
                   <div className="flex justify-between bg-muted p-2 rounded">
@@ -918,8 +971,10 @@ const MonthlyMembershipForm: React.FC = () => {
                   : `Apply for Membership - ₱${monthlyPrice}`}
               </Button>
               <p className="text-sm text-muted-foreground">
-                {formData.paymentMethod === "gcash" ||
-                formData.paymentMethod === "bank_transfer"
+                {!ONLINE_PAYMENTS_AVAILABLE
+                  ? "Your membership will be activated upon cash payment at the gym."
+                  : formData.paymentMethod === "gcash" ||
+                    formData.paymentMethod === "bank_transfer"
                   ? "Payment instructions will be shown after form submission."
                   : "Your membership will be activated upon payment verification."}
               </p>
@@ -927,8 +982,6 @@ const MonthlyMembershipForm: React.FC = () => {
           </form>
         </CardContent>
       </Card>
-
-      {/* REMOVED: Active Memberships Display - HINDI NA ITO IPAPAKITA */}
 
       {/* Chatbot Component */}
       <Chatbot />

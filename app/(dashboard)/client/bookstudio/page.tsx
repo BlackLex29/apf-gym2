@@ -13,6 +13,7 @@ import {
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
 import Chatbot from "@/components/Chatbot";
+import Swal from "sweetalert2";
 
 // Type definitions
 type ActivityType = "modeling" | "dance" | "zumba";
@@ -122,11 +123,11 @@ const BookStudioForm: React.FC = () => {
             const userDataFromFirestore = userDoc.data() as UserData;
             setUserData(userDataFromFirestore);
 
-            // Pre-fill form with user data
+            // Pre-fill only the name, not the phone number
             setFormData((prev) => ({
               ...prev,
               name: `${userDataFromFirestore.firstName} ${userDataFromFirestore.lastName}`,
-              phone: userDataFromFirestore.phone,
+              // Phone number is intentionally NOT pre-filled
             }));
           }
         } catch (error) {
@@ -195,13 +196,33 @@ const BookStudioForm: React.FC = () => {
     return `${prefix}-${timestamp}-${random}`;
   };
 
-  // Format phone number to 11 digits
+  // Format phone number to 11 digits and prevent letters
   const formatPhoneNumber = (value: string): string => {
     // Remove all non-digit characters
     const digits = value.replace(/\D/g, "");
-
+    
     // Limit to 11 digits
     return digits.slice(0, 11);
+  };
+
+  // Handle phone number input with validation
+  const handlePhoneInput = (value: string) => {
+    const formattedPhone = formatPhoneNumber(value);
+    setFormData((prev) => ({
+      ...prev,
+      phone: formattedPhone,
+    }));
+  };
+
+  // Handle paste event for phone number to prevent non-digit characters
+  const handlePhonePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pastedText = e.clipboardData.getData('text');
+    const digitsOnly = pastedText.replace(/\D/g, "").slice(0, 11);
+    setFormData((prev) => ({
+      ...prev,
+      phone: digitsOnly,
+    }));
   };
 
   const handleInputChange = (
@@ -212,11 +233,7 @@ const BookStudioForm: React.FC = () => {
     const { name, value } = e.target;
 
     if (name === "phone") {
-      const formattedPhone = formatPhoneNumber(value);
-      setFormData((prev) => ({
-        ...prev,
-        [name]: formattedPhone,
-      }));
+      handlePhoneInput(value);
     } else {
       const newValue =
         name === "duration" || name === "participants"
@@ -235,18 +252,84 @@ const BookStudioForm: React.FC = () => {
     }
   };
 
+  // Show success SweetAlert
+  const showSuccessAlert = (bookingReference: string, totalPrice: number) => {
+    Swal.fire({
+      title: '🎉 Booking Successful!',
+      html: `
+        <div class="text-left">
+          <p class="mb-2"><strong>Booking Reference:</strong> ${bookingReference}</p>
+          <p class="mb-2"><strong>Total Amount:</strong> ₱${totalPrice}</p>
+          <p class="mb-2"><strong>Status:</strong> <span class="text-yellow-600">Pending Confirmation</span></p>
+          <p class="text-sm text-gray-600 mt-3">We will contact you within 24 hours to confirm your booking.</p>
+        </div>
+      `,
+      icon: 'success',
+      confirmButtonText: 'Great!',
+      confirmButtonColor: '#10B981',
+      customClass: {
+        popup: 'rounded-lg',
+        confirmButton: 'px-6 py-2 rounded-lg'
+      }
+    });
+  };
+
+  // Show error SweetAlert
+  const showErrorAlert = (message: string) => {
+    Swal.fire({
+      title: '❌ Error',
+      text: message,
+      icon: 'error',
+      confirmButtonText: 'Try Again',
+      confirmButtonColor: '#EF4444',
+      customClass: {
+        popup: 'rounded-lg',
+        confirmButton: 'px-6 py-2 rounded-lg'
+      }
+    });
+  };
+
+  // Show login required SweetAlert
+  const showLoginAlert = () => {
+    Swal.fire({
+      title: '🔐 Login Required',
+      text: 'Please log in to book a studio session.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Go to Login',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#3B82F6',
+      cancelButtonColor: '#6B7280',
+      customClass: {
+        popup: 'rounded-lg',
+        confirmButton: 'px-6 py-2 rounded-lg',
+        cancelButton: 'px-6 py-2 rounded-lg'
+      }
+    }).then((result) => {
+      if (result.isConfirmed) {
+        window.location.href = "/login";
+      }
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Check if user is logged in
     if (!currentUser) {
-      setSubmitMessage("❌ Please log in to book a studio session.");
+      showLoginAlert();
       return;
     }
 
     // Validate phone number
     if (formData.phone.length !== 11) {
-      setSubmitMessage("❌ Please enter a valid 11-digit phone number");
+      showErrorAlert("Please enter a valid 11-digit phone number");
+      return;
+    }
+
+    // Validate phone number starts with 09
+    if (!formData.phone.startsWith('09')) {
+      showErrorAlert("Phone number must start with '09'");
       return;
     }
 
@@ -267,14 +350,13 @@ const BookStudioForm: React.FC = () => {
       // Save to Firestore
       const docRef = await addDoc(collection(db, "bookings"), bookingData);
 
-      setSubmitMessage(
-        `✅ Booking successful! Your reference: ${bookingReference}. Total: ₱${totalPrice}`
-      );
+      // Show success alert
+      showSuccessAlert(bookingReference, totalPrice);
 
-      // Reset form but keep pre-filled user data
+      // Reset form but keep pre-filled user name only
       setFormData({
         name: userData ? `${userData.firstName} ${userData.lastName}` : "",
-        phone: userData?.phone || "",
+        phone: "", // Reset phone number
         activityType: "dance",
         date: "",
         timeSlot: TIME_SLOTS[0],
@@ -283,12 +365,14 @@ const BookStudioForm: React.FC = () => {
         specialRequests: "",
       });
       setAvailableSlots([]);
+      setSubmitMessage("");
 
       // Log to console (for demo)
       console.log("Booking saved with ID:", docRef.id, bookingData);
     } catch (error) {
       console.error("Error saving booking:", error);
-      setSubmitMessage("❌ Error booking appointment. Please try again.");
+      showErrorAlert("Error booking appointment. Please try again.");
+      setSubmitMessage("");
     } finally {
       setIsSubmitting(false);
     }
@@ -373,8 +457,7 @@ const BookStudioForm: React.FC = () => {
             {userData && (
               <div className="mt-4 bg-primary/5 border border-primary/20 rounded-lg p-4 inline-block">
                 <p className="text-sm text-foreground">
-                  <strong>Welcome back, {userData.firstName}!</strong> Your
-                  information has been pre-filled.
+                  <strong>Welcome back, {userData.firstName}!</strong> Your name has been pre-filled.
                 </p>
               </div>
             )}
@@ -457,10 +540,14 @@ const BookStudioForm: React.FC = () => {
                       name="phone"
                       value={formData.phone}
                       onChange={handleInputChange}
+                      onPaste={handlePhonePaste}
                       required
                       maxLength={11}
+                      pattern="[0-9]*"
+                      inputMode="numeric"
                       className="w-full px-4 py-3 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200"
                       placeholder="09XXXXXXXXX"
+                      title="Please enter 11-digit phone number starting with 09"
                     />
                     <div className="flex justify-between items-center">
                       <p className="text-sm text-muted-foreground">
@@ -470,15 +557,17 @@ const BookStudioForm: React.FC = () => {
                         className={`text-sm font-medium ${
                           formData.phone.length === 11
                             ? "text-green-600"
-                            : "text-red-600"
+                            : formData.phone.length > 0
+                            ? "text-red-600"
+                            : "text-muted-foreground"
                         }`}
                       >
                         {formData.phone.length}/11 digits
                       </p>
                     </div>
-                    {userData && (
-                      <p className="text-xs text-green-600">
-                        ✓ Pre-filled from your account
+                    {formData.phone.length > 0 && !formData.phone.startsWith('09') && (
+                      <p className="text-xs text-red-600">
+                        ❌ Phone number must start with 09
                       </p>
                     )}
                   </div>
@@ -785,7 +874,8 @@ const BookStudioForm: React.FC = () => {
                   disabled={
                     isSubmitting ||
                     (formData.date && availableSlots.length === 0) ||
-                    formData.phone.length !== 11
+                    formData.phone.length !== 11 ||
+                    !formData.phone.startsWith('09')
                   }
                   className="w-full lg:w-auto px-8 py-4 bg-primary text-primary-foreground font-semibold rounded-lg hover:bg-primary/90 transform hover:scale-105 transition-all duration-200 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed disabled:transform-none text-lg"
                 >
