@@ -13,6 +13,7 @@ import {
   orderBy,
   doc,
   getDoc,
+  updateDoc,
 } from "firebase/firestore";
 import {
   Calendar,
@@ -24,6 +25,7 @@ import {
   PlayCircle,
   MapPin,
   User as UserIcon,
+  Zap,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -57,6 +59,9 @@ interface ClientBooking {
   coachId: string;
   coachName: string;
   clientEmail: string;
+  clientUid: string;
+  clientName: string;
+  clientPhone: string;
   sessions: BookingSession[];
   totalSessions: number;
   totalPrice: number;
@@ -85,7 +90,7 @@ interface UserData {
   lastName: string;
   email: string;
   phone: string;
-  role: "admin" | "owner" | "client";
+  role: "admin" | "owner" | "client" | "coach";
   emailVerified: boolean;
   createdAt: string;
 }
@@ -125,7 +130,7 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
   );
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<
     "cash" | "online"
-  >("cash"); // Changed default to "cash"
+  >("cash");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookingSubmitted, setBookingSubmitted] = useState(false);
   const [coachSchedules, setCoachSchedules] = useState<CoachSchedule[]>([]);
@@ -357,10 +362,6 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const handleOnlinePayment = async () => {
-    await handleSubmitBooking();
   };
 
   // Show login prompt if user is not logged in
@@ -655,14 +656,14 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
                   : "bg-background border-border hover:bg-green-50 dark:hover:bg-green-900/20"
               }`}
             >
-              < div className="w-5 h-5" />
+              <div className="w-5 h-5" />
               <span className="font-medium"> ₱ Pay now</span>
             </button>
           </div>
         </div>
 
         <button
-          onClick={handleSubmitBooking} // Always use handleSubmitBooking since we only have cash payment
+          onClick={handleSubmitBooking}
           disabled={isSubmitting || selectedSessions.length === 0}
           className={`w-full py-4 rounded-lg font-semibold transition text-lg ${
             isSubmitting || selectedSessions.length === 0
@@ -681,12 +682,13 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
   );
 };
 
-// Booking Status Component
+// Booking Status Component with Convert Session functionality
 const BookingStatusSection = () => {
   const [clientBookings, setClientBookings] = useState<ClientBooking[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userData, setUserData] = useState<UserData | null>(null);
+  const [convertingBooking, setConvertingBooking] = useState<string | null>(null);
 
   useEffect(() => {
     // Listen to auth state changes
@@ -746,6 +748,65 @@ const BookingStatusSection = () => {
 
     return () => unsubscribeAuth();
   }, []);
+
+  // Function to convert booking to sessions
+  const convertBookingToSessions = async (booking: ClientBooking) => {
+    if (!currentUser) return;
+    
+    setConvertingBooking(booking.id);
+    try {
+      // Check if user is a coach
+      if (userData?.role !== 'coach') {
+        alert('Only coaches can convert bookings to sessions.');
+        return;
+      }
+
+      // Create sessions for each booked time slot
+      const sessionPromises = booking.sessions.map(async (session) => {
+        const sessionData = {
+          sessionId: `SESS-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          clientId: booking.clientUid,
+          clientName: booking.clientName || booking.clientEmail,
+          clientEmail: booking.clientEmail,
+          clientPhone: booking.clientPhone || 'Not provided',
+          coachId: booking.coachId,
+          coachName: booking.coachName,
+          sessionType: 'personal_training',
+          date: session.date,
+          startTime: session.time.split(' - ')[0],
+          endTime: session.time.split(' - ')[1] || `${parseInt(session.time.split(' - ')[0]) + 2}:00`,
+          duration: session.duration * 60, // Convert hours to minutes
+          location: 'gym',
+          focusArea: [],
+          notes: `Converted from booking ${booking.id}`,
+          status: 'scheduled' as const,
+          paymentStatus: 'paid' as const,
+          price: booking.totalPrice / booking.totalSessions,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          originalBookingId: booking.id
+        };
+
+        await addDoc(collection(db, 'sessions'), sessionData);
+      });
+
+      await Promise.all(sessionPromises);
+
+      // Update booking status to confirmed
+      const bookingRef = doc(db, 'bookings', booking.id);
+      await updateDoc(bookingRef, {
+        status: 'confirmed',
+        updatedAt: serverTimestamp()
+      });
+
+      alert(`Successfully converted booking to ${booking.sessions.length} session(s)!`);
+    } catch (error) {
+      console.error('Error converting booking to sessions:', error);
+      alert('Error converting booking to sessions');
+    } finally {
+      setConvertingBooking(null);
+    }
+  };
 
   const getStatusColor = (status: ClientBooking["status"]): string => {
     switch (status) {
@@ -865,18 +926,21 @@ const BookingStatusSection = () => {
                 Welcome back, {userData.firstName}!
               </h2>
               <p className="text-muted-foreground">
-                Here&#39;s your current coaching session status
+                {userData.role === 'coach' 
+                  ? "Manage your client bookings and convert them to sessions"
+                  : "Here's your current coaching session status"}
               </p>
             </div>
           </div>
         )}
 
         <h2 className="text-3xl md:text-4xl font-bold text-foreground text-center mb-4">
-          Your Booking Status
+          {userData?.role === 'coach' ? 'Client Bookings Management' : 'Your Booking Status'}
         </h2>
         <p className="text-muted-foreground text-center mb-12 max-w-2xl mx-auto">
-          Track your coaching sessions and get real-time updates on your
-          bookings
+          {userData?.role === 'coach' 
+            ? 'Track client bookings and convert them to scheduled sessions'
+            : 'Track your coaching sessions and get real-time updates on your bookings'}
         </p>
 
         {clientBookings.length === 0 ? (
@@ -888,7 +952,9 @@ const BookingStatusSection = () => {
               No Bookings Yet
             </h3>
             <p className="text-muted-foreground mb-6">
-              Book your first coaching session to get started!
+              {userData?.role === 'coach' 
+                ? 'No client bookings available yet.'
+                : 'Book your first coaching session to get started!'}
             </p>
           </div>
         ) : (
@@ -904,6 +970,9 @@ const BookingStatusSection = () => {
                     <h3 className="font-bold text-lg text-foreground">
                       {booking.coachName}
                     </h3>
+                    <p className="text-sm text-muted-foreground">
+                      {userData?.role === 'coach' ? booking.clientName || booking.clientEmail : booking.coachName}
+                    </p>
                     <p className="text-sm text-muted-foreground">
                       {booking.totalSessions} session
                       {booking.totalSessions !== 1 ? "s" : ""} • {formatCurrency(booking.totalPrice)}
@@ -953,8 +1022,52 @@ const BookingStatusSection = () => {
                   </div>
                 </div>
 
-                {/* Action Button */}
-                {booking.status === "in_progress" && (
+                {/* Coach Actions */}
+                {userData?.role === 'coach' && booking.status === 'pending_confirmation' && (
+                  <div className="mt-4 space-y-2">
+                    <button
+                      onClick={() => convertBookingToSessions(booking)}
+                      disabled={convertingBooking === booking.id}
+                      className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition ${
+                        convertingBooking === booking.id
+                          ? 'bg-gray-400 cursor-not-allowed'
+                          : 'bg-orange-500 hover:bg-orange-600 text-white'
+                      }`}
+                    >
+                      <Zap className="w-4 h-4" />
+                      {convertingBooking === booking.id ? 'Converting...' : 'Convert to Sessions'}
+                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          const bookingRef = doc(db, 'bookings', booking.id);
+                          await updateDoc(bookingRef, {
+                            status: 'confirmed',
+                            updatedAt: serverTimestamp()
+                          });
+                        }}
+                        className="flex-1 bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded text-sm font-medium"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const bookingRef = doc(db, 'bookings', booking.id);
+                          await updateDoc(bookingRef, {
+                            status: 'cancelled',
+                            updatedAt: serverTimestamp()
+                          });
+                        }}
+                        className="flex-1 bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded text-sm font-medium"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Client Actions */}
+                {userData?.role !== 'coach' && booking.status === 'in_progress' && (
                   <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
                     <div className="flex items-center gap-2 text-green-700 dark:text-green-300 mb-2">
                       <MapPin className="w-4 h-4" />
@@ -969,7 +1082,7 @@ const BookingStatusSection = () => {
                   </div>
                 )}
 
-                {booking.status === "confirmed" && (
+                {userData?.role !== 'coach' && booking.status === 'confirmed' && (
                   <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                     <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 mb-2">
                       <Clock className="w-4 h-4" />
@@ -1120,3 +1233,4 @@ export function CoachesCarousel() {
     </>
   );
 }
+export default CoachesCarousel;

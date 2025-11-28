@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   collection, 
   addDoc, 
@@ -9,8 +9,7 @@ import {
   orderBy, 
   updateDoc, 
   doc, 
-  Timestamp,
-  onSnapshot 
+  Timestamp
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
@@ -42,6 +41,7 @@ interface Session {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   originalBookingId?: string; // Track which booking this came from
+  completedAt?: Timestamp; // New field for completion timestamp
 }
 
 interface Client {
@@ -81,6 +81,60 @@ interface Booking {
   updatedAt: Timestamp;
 }
 
+// Beautiful Alert Component
+const Alert: React.FC<{
+  type: 'success' | 'error' | 'warning' | 'info';
+  message: string;
+  onClose: () => void;
+}> = ({ type, message, onClose }) => {
+  const alertConfig = {
+    success: {
+      bgColor: 'bg-green-50 border-green-200',
+      textColor: 'text-green-800',
+      icon: '✅',
+      title: 'Success'
+    },
+    error: {
+      bgColor: 'bg-red-50 border-red-200',
+      textColor: 'text-red-800',
+      icon: '❌',
+      title: 'Error'
+    },
+    warning: {
+      bgColor: 'bg-yellow-50 border-yellow-200',
+      textColor: 'text-yellow-800',
+      icon: '⚠️',
+      title: 'Warning'
+    },
+    info: {
+      bgColor: 'bg-blue-50 border-blue-200',
+      textColor: 'text-blue-800',
+      icon: 'ℹ️',
+      title: 'Info'
+    }
+  };
+
+  const config = alertConfig[type];
+
+  return (
+    <div className={`fixed top-4 right-4 z-50 border rounded-lg p-4 shadow-lg ${config.bgColor} ${config.textColor} max-w-sm animate-in slide-in-from-right duration-300`}>
+      <div className="flex items-start">
+        <div className="flex-shrink-0 text-lg mr-3">{config.icon}</div>
+        <div className="flex-1">
+          <div className="font-semibold">{config.title}</div>
+          <div className="text-sm mt-1">{message}</div>
+        </div>
+        <button
+          onClick={onClose}
+          className="flex-shrink-0 ml-4 text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const SessionManagement: React.FC = () => {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -89,7 +143,7 @@ const SessionManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'completed' | 'all' | 'bookings'>('upcoming');
   const [showSessionForm, setShowSessionForm] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  const [alert, setAlert] = useState<{ type: 'success' | 'error' | 'warning' | 'info'; message: string } | null>(null);
 
   // Session form state
   const [sessionForm, setSessionForm] = useState({
@@ -118,6 +172,12 @@ const SessionManagement: React.FC = () => {
     { value: 'assessment', label: 'Fitness Assessment', price: 600 }
   ];
 
+  // Show alert function
+  const showAlert = (type: 'success' | 'error' | 'warning' | 'info', message: string) => {
+    setAlert({ type, message });
+    setTimeout(() => setAlert(null), 5000);
+  };
+
   // Generate session ID
   const generateSessionId = (): string => {
     const prefix = 'SESS';
@@ -126,8 +186,19 @@ const SessionManagement: React.FC = () => {
     return `${prefix}-${timestamp}-${random}`;
   };
 
-  // Load all data
-  const loadData = async () => {
+  // Safe function to get client name from email
+  const getClientNameFromEmail = (email: string | undefined): string => {
+    if (!email) return 'Unknown Client';
+    return email.split('@')[0];
+  };
+
+  // Safe function to get client email
+  const getClientEmail = (booking: Booking): string => {
+    return booking.clientEmail || 'No email provided';
+  };
+
+  // Load all data - wrapped in useCallback to fix useEffect dependency
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       // Load sessions
@@ -140,13 +211,29 @@ const SessionManagement: React.FC = () => {
       });
       setSessions(sessionsData);
 
-      // Load bookings
+      // Load bookings with safe data handling
       const bookingsRef = collection(db, 'bookings');
       const bookingsQuery = query(bookingsRef, orderBy('createdAt', 'desc'));
       const bookingsSnapshot = await getDocs(bookingsQuery);
       const bookingsData: Booking[] = [];
       bookingsSnapshot.forEach((doc) => {
-        bookingsData.push({ id: doc.id, ...doc.data() } as Booking);
+        const data = doc.data();
+        // Ensure all required fields have default values
+        bookingsData.push({ 
+          id: doc.id, 
+          coachId: data.coachId || '',
+          coachName: data.coachName || 'Unknown Coach',
+          coachEmail: data.coachEmail || '',
+          clientEmail: data.clientEmail || '',
+          clientUid: data.clientUid || '',
+          sessions: data.sessions || [],
+          totalSessions: data.totalSessions || 0,
+          totalPrice: data.totalPrice || 0,
+          paymentMethod: data.paymentMethod || 'cash',
+          status: data.status || 'pending_confirmation',
+          createdAt: data.createdAt || Timestamp.now(),
+          updatedAt: data.updatedAt || Timestamp.now()
+        } as Booking);
       });
       setBookings(bookingsData);
 
@@ -159,25 +246,27 @@ const SessionManagement: React.FC = () => {
         const data = doc.data();
         clientsData.push({
           id: doc.id,
-          name: `${data.firstName} ${data.lastName}`,
-          email: data.email,
-          phone: data.phone,
-          membershipStatus: data.status
+          name: `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Unknown Client',
+          email: data.email || '',
+          phone: data.phone || 'Not provided',
+          membershipStatus: data.status || 'unknown'
         });
       });
 
-      // Also load from bookings for booking-only clients
+      // Also load from bookings for booking-only clients with safe handling
       const existingEmails = new Set(clientsData.map(client => client.email));
       
       bookingsData.forEach((booking) => {
-        if (!existingEmails.has(booking.clientEmail)) {
+        const clientEmail = getClientEmail(booking);
+        if (clientEmail && !existingEmails.has(clientEmail)) {
           clientsData.push({
             id: `booking-${booking.id}`,
-            name: booking.clientEmail.split('@')[0], // Use email prefix as name
-            email: booking.clientEmail,
+            name: getClientNameFromEmail(clientEmail),
+            email: clientEmail,
             phone: 'Not provided',
             membershipStatus: 'booking_only'
           });
+          existingEmails.add(clientEmail);
         }
       });
 
@@ -192,67 +281,26 @@ const SessionManagement: React.FC = () => {
         const data = doc.data();
         coachesData.push({
           id: doc.id,
-          name: data.name,
-          email: data.email,
-          specialty: data.specialty,
-          status: data.status,
-          authUid: data.authUid
+          name: data.name || 'Unknown Coach',
+          email: data.email || '',
+          specialty: data.specialty || 'General',
+          status: data.status || 'active',
+          authUid: data.authUid || ''
         } as Coach);
       });
       setCoaches(coachesData);
 
     } catch (error) {
       console.error('Error loading data:', error);
+      showAlert('error', 'Error loading data');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // Convert booking to sessions
-  const convertBookingToSessions = async (booking: Booking) => {
+  // Confirm booking (hindi na convert to sessions)
+  const confirmBooking = async (booking: Booking) => {
     try {
-      const coach = coaches.find(c => c.id === booking.coachId);
-      if (!coach) {
-        alert('Coach not found for this booking');
-        return;
-      }
-
-      // Create a session for each booked time slot
-      const sessionPromises = booking.sessions.map(async (sessionSlot) => {
-        // Parse the time string to extract start time
-        const timeParts = sessionSlot.time.split(' - ');
-        const startTime = timeParts[0];
-        const endTime = timeParts[1] || `${parseInt(startTime.split(':')[0]) + 2}:00`;
-
-        const sessionData: Omit<Session, 'id'> = {
-          sessionId: generateSessionId(),
-          clientId: booking.clientUid || `booking-${booking.id}`,
-          clientName: booking.clientEmail.split('@')[0],
-          clientEmail: booking.clientEmail,
-          clientPhone: 'Not provided',
-          coachId: booking.coachId,
-          coachName: booking.coachName,
-          sessionType: 'personal_training', // Default to personal training
-          date: Timestamp.fromDate(new Date(sessionSlot.date)),
-          startTime: startTime,
-          endTime: endTime,
-          duration: sessionSlot.duration * 60, // Convert hours to minutes
-          location: 'gym',
-          focusArea: [],
-          notes: `Created from booking ${booking.id}`,
-          status: 'scheduled',
-          paymentStatus: booking.paymentMethod === 'online' ? 'pending' : 'pending',
-          price: booking.totalPrice / booking.totalSessions,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now(),
-          originalBookingId: booking.id
-        };
-
-        return await addDoc(collection(db, 'sessions'), sessionData);
-      });
-
-      await Promise.all(sessionPromises);
-
       // Update booking status to confirmed
       const bookingRef = doc(db, 'bookings', booking.id);
       await updateDoc(bookingRef, {
@@ -260,12 +308,12 @@ const SessionManagement: React.FC = () => {
         updatedAt: Timestamp.now()
       });
 
-      alert(`Successfully converted booking to ${booking.sessions.length} session(s)!`);
+      showAlert('success', `Booking confirmed successfully for ${getClientEmail(booking)}!`);
       loadData(); // Reload data
 
     } catch (error) {
-      console.error('Error converting booking to sessions:', error);
-      alert('Error converting booking to sessions');
+      console.error('Error confirming booking:', error);
+      showAlert('error', 'Error confirming booking');
     }
   };
 
@@ -321,7 +369,7 @@ const SessionManagement: React.FC = () => {
     e.preventDefault();
     
     if (!sessionForm.clientId || !sessionForm.coachId || !sessionForm.date) {
-      alert('Please fill in all required fields');
+      showAlert('warning', 'Please fill in all required fields');
       return;
     }
 
@@ -330,7 +378,7 @@ const SessionManagement: React.FC = () => {
       const selectedCoach = coaches.find(c => c.id === sessionForm.coachId);
 
       if (!selectedClient || !selectedCoach) {
-        alert('Invalid client or coach selection');
+        showAlert('error', 'Invalid client or coach selection');
         return;
       }
 
@@ -359,14 +407,14 @@ const SessionManagement: React.FC = () => {
 
       await addDoc(collection(db, 'sessions'), sessionData);
       
-      alert('Session created successfully!');
+      showAlert('success', `Session created successfully for ${selectedClient.name}!`);
       setShowSessionForm(false);
       resetForm();
       loadData(); // Reload sessions
       
     } catch (error) {
       console.error('Error creating session:', error);
-      alert('Error creating session');
+      showAlert('error', 'Error creating session');
     }
   };
 
@@ -374,19 +422,42 @@ const SessionManagement: React.FC = () => {
   const updateSessionStatus = async (sessionId: string, status: SessionStatus) => {
     try {
       const sessionRef = doc(db, 'sessions', sessionId);
-      await updateDoc(sessionRef, {
+      
+      // Define proper type for update data
+      const updateData: {
+        status: SessionStatus;
+        updatedAt: Timestamp;
+        completedAt?: Timestamp;
+      } = {
         status,
         updatedAt: Timestamp.now()
-      });
+      };
+
+      // If marking as completed, add completedAt timestamp
+      if (status === 'completed') {
+        updateData.completedAt = Timestamp.now();
+      }
+
+      await updateDoc(sessionRef, updateData);
       
       setSessions(prev => prev.map(session =>
-        session.id === sessionId ? { ...session, status, updatedAt: Timestamp.now() } : session
+        session.id === sessionId ? { ...session, ...updateData } : session
       ));
+
+      const session = sessions.find(s => s.id === sessionId);
+      if (session) {
+        if (status === 'completed') {
+          showAlert('success', `🎉 Session completed for ${session.clientName}! Great job!`);
+        } else if (status === 'in_progress') {
+          showAlert('info', `Session started for ${session.clientName}`);
+        } else if (status === 'cancelled') {
+          showAlert('warning', `Session cancelled for ${session.clientName}`);
+        }
+      }
       
-      alert(`Session marked as ${status.replace('_', ' ')}`);
     } catch (error) {
       console.error('Error updating session:', error);
-      alert('Error updating session');
+      showAlert('error', 'Error updating session');
     }
   };
 
@@ -398,12 +469,18 @@ const SessionManagement: React.FC = () => {
         status,
         updatedAt: Timestamp.now()
       });
+
+      const booking = bookings.find(b => b.id === bookingId);
+      if (booking) {
+        if (status === 'cancelled') {
+          showAlert('warning', `Booking cancelled for ${getClientEmail(booking)}`);
+        }
+      }
       
-      alert(`Booking marked as ${status.replace('_', ' ')}`);
       loadData(); // Reload data
     } catch (error) {
       console.error('Error updating booking:', error);
-      alert('Error updating booking');
+      showAlert('error', 'Error updating booking');
     }
   };
 
@@ -446,6 +523,27 @@ const SessionManagement: React.FC = () => {
   const filteredBookings = bookings.filter(booking => 
     booking.status === 'pending_confirmation' || booking.status === 'pending_payment'
   );
+
+  // Get today's completed sessions count - IMPROVED
+  const getTodayCompletedSessions = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    return sessions.filter(session => {
+      if (session.status !== 'completed') return false;
+      
+      // Check if completed today OR session date is today
+      const sessionDate = session.date.toDate();
+      sessionDate.setHours(0, 0, 0, 0);
+      
+      const completedToday = session.completedAt && 
+        session.completedAt.toDate().toDateString() === today.toDateString();
+      
+      const sessionWasToday = sessionDate.toDateString() === today.toDateString();
+      
+      return completedToday || sessionWasToday;
+    }).length;
+  };
 
   // Get session status color - UPDATED TO MATCH ORANGE COLOR SCHEME
   const getSessionStatusColor = (status: SessionStatus) => {
@@ -494,6 +592,15 @@ const SessionManagement: React.FC = () => {
     });
   };
 
+  // Format time for display
+  const formatSessionTime = (timestamp: Timestamp) => {
+    const date = timestamp.toDate();
+    return date.toLocaleTimeString('en-PH', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
   // Format booking date
   const formatBookingDate = (timestamp: Timestamp) => {
     const date = timestamp.toDate();
@@ -506,9 +613,17 @@ const SessionManagement: React.FC = () => {
     });
   };
 
+  // Get completion time if available
+  const getCompletionTime = (session: Session) => {
+    if (session.completedAt) {
+      return formatSessionTime(session.completedAt);
+    }
+    return 'N/A';
+  };
+
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]); // Fixed dependency array
 
   if (loading) {
     return (
@@ -523,13 +638,22 @@ const SessionManagement: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background py-8">
+      {/* Beautiful Alert */}
+      {alert && (
+        <Alert
+          type={alert.type}
+          message={alert.message}
+          onClose={() => setAlert(null)}
+        />
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-3xl font-bold text-foreground mb-2">Session Management</h1>
-              <p className="text-muted-foreground">Manage coaching sessions and convert bookings</p>
+              <p className="text-muted-foreground">Manage coaching sessions and bookings</p>
             </div>
             <button
               onClick={() => setShowSessionForm(true)}
@@ -540,7 +664,7 @@ const SessionManagement: React.FC = () => {
           </div>
         </div>
 
-        {/* Stats Cards - UPDATED COLORS */}
+        {/* Stats Cards - UPDATED with accurate completed today count */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-card rounded-lg shadow p-6">
             <div className="flex items-center">
@@ -564,8 +688,7 @@ const SessionManagement: React.FC = () => {
               <div className="ml-4">
                 <p className="text-sm font-medium text-muted-foreground">Completed Today</p>
                 <p className="text-2xl font-bold text-foreground">
-                  {sessions.filter(s => s.status === 'completed' && 
-                    s.date.toDate().toDateString() === new Date().toDateString()).length}
+                  {getTodayCompletedSessions()}
                 </p>
               </div>
             </div>
@@ -620,7 +743,7 @@ const SessionManagement: React.FC = () => {
                     : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted'
                 }`}
               >
-                ✅ Completed
+                ✅ Completed ({sessions.filter(s => s.status === 'completed').length})
               </button>
               <button
                 onClick={() => setActiveTab('bookings')}
@@ -640,7 +763,7 @@ const SessionManagement: React.FC = () => {
                     : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted'
                 }`}
               >
-                📊 All Sessions
+                📊 All Sessions ({sessions.length})
               </button>
             </nav>
           </div>
@@ -664,7 +787,7 @@ const SessionManagement: React.FC = () => {
                       <div className="flex justify-between items-start mb-3">
                         <div>
                           <h4 className="font-semibold text-foreground">{booking.coachName}</h4>
-                          <p className="text-sm text-muted-foreground">{booking.clientEmail}</p>
+                          <p className="text-sm text-muted-foreground">{getClientEmail(booking)}</p>
                           <p className="text-sm text-muted-foreground">
                             {booking.totalSessions} session(s) • ₱{booking.totalPrice}
                           </p>
@@ -693,10 +816,10 @@ const SessionManagement: React.FC = () => {
                         </div>
                         <div className="flex gap-2">
                           <button
-                            onClick={() => convertBookingToSessions(booking)}
+                            onClick={() => confirmBooking(booking)}
                             className="bg-primary text-primary-foreground px-4 py-2 rounded text-sm font-medium hover:bg-primary/90"
                           >
-                            Convert to Sessions
+                            Confirm Booking
                           </button>
                           <button
                             onClick={() => updateBookingStatus(booking.id, 'cancelled')}
@@ -770,6 +893,11 @@ const SessionManagement: React.FC = () => {
                             <div className="text-xs text-muted-foreground">Focus: {session.focusArea.join(', ')}</div>
                           </div>
                         )}
+                        {session.status === 'completed' && session.completedAt && (
+                          <div className="mt-1 text-xs text-green-600 font-medium">
+                            ✅ Completed at: {getCompletionTime(session)}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="mb-2">
@@ -812,12 +940,17 @@ const SessionManagement: React.FC = () => {
                               onClick={() => updateSessionStatus(session.id!, 'completed')}
                               className="bg-green-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-green-700"
                             >
-                              Complete
+                              Complete Session
                             </button>
                           )}
-                          {session.notes && (
+                          {(session.status === 'completed' || session.notes) && (
                             <div className="text-xs text-muted-foreground mt-1">
-                              📝 Has notes
+                              {session.notes && "📝 Has notes"}
+                              {session.status === 'completed' && session.completedAt && (
+                                <div className="text-green-600">
+                                  ✅ Completed
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -829,14 +962,22 @@ const SessionManagement: React.FC = () => {
               
               {filteredSessions.length === 0 && (
                 <div className="text-center py-12">
-                  <div className="text-muted-foreground text-6xl mb-4">📅</div>
-                  <h3 className="text-lg font-medium text-foreground mb-2">No sessions found</h3>
-                  <p className="text-muted-foreground mb-4">
+                  <div className="text-muted-foreground text-6xl mb-4">
+                    {activeTab === 'upcoming' ? '📅' : activeTab === 'completed' ? '✅' : '📊'}
+                  </div>
+                  <h3 className="text-lg font-medium text-foreground mb-2">
                     {activeTab === 'upcoming' 
                       ? 'No upcoming sessions scheduled.' 
                       : activeTab === 'completed'
                       ? 'No completed sessions yet.'
                       : 'No sessions found.'}
+                  </h3>
+                  <p className="text-muted-foreground mb-4">
+                    {activeTab === 'upcoming' 
+                      ? 'Schedule new sessions to see them here.' 
+                      : activeTab === 'completed'
+                      ? 'Completed sessions will appear here.'
+                      : 'No sessions available in the system.'}
                   </p>
                   {activeTab === 'upcoming' && (
                     <button

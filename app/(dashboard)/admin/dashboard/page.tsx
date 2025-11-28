@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
-  Users, Calendar, TrendingUp, Bell, Dumbbell, Clock, DollarSign,
+  Users, Calendar, TrendingUp, Dumbbell, Clock, DollarSign,
   Music, RefreshCw, Plus, X, Search, Filter
 } from 'lucide-react';
 
@@ -379,10 +379,6 @@ const AdminDashboard = () => {
                 <option value="week">This Week</option>
                 <option value="month">This Month</option>
               </select>
-              <button className="relative p-2 bg-muted rounded-lg hover:bg-accent transition-colors">
-                <Bell className="w-5 h-5" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full"></span>
-              </button>
             </div>
           </div>
         </div>

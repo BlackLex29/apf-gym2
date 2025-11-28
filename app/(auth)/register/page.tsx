@@ -103,9 +103,21 @@ const validatePhone = (phone: string): string | undefined => {
     if (!phone.trim()) return "Phone number is required";
     // Remove all non-digit characters for validation
     const cleanPhone = phone.replace(/\D/g, '');
+    
+    // Philippine phone number validation
     if (cleanPhone.length < 10) return "Phone number must be at least 10 digits";
-    if (cleanPhone.length > 15) return "Phone number must be less than 15 digits";
-    if (!/^\d+$/.test(cleanPhone)) return "Phone number can only contain numbers and formatting characters";
+    if (cleanPhone.length > 11) return "Phone number must be 10 or 11 digits";
+    
+    // Check if it starts with Philippine mobile prefixes (09, +639, 639)
+    if (!/^(09|\+?639|639)\d+$/.test(cleanPhone)) {
+        return "Please enter a valid Philippine mobile number (starts with 09)";
+    }
+    
+    // Check if it's exactly 10 or 11 digits after cleaning
+    if (cleanPhone.length !== 10 && cleanPhone.length !== 11) {
+        return "Philippine mobile numbers must be 10 or 11 digits";
+    }
+    
     return undefined;
 };
 
@@ -244,20 +256,21 @@ export default function RegisterPage() {
     const ADMIN_EMAIL = process.env.NEXT_PUBLIC_ADMIN_EMAIL!;
     const OWNER_EMAIL = process.env.NEXT_PUBLIC_OWNER_EMAIL!;
 
-    // Format phone number as user types
+    // Format Philippine phone number as user types
     const formatPhoneNumber = (value: string): string => {
         // Remove all non-digit characters
         const cleanValue = value.replace(/\D/g, '');
         
-        // Apply formatting based on length
+        // Apply Philippine mobile number formatting
+        if (cleanValue.length === 0) return '';
         if (cleanValue.length <= 3) {
             return cleanValue;
         } else if (cleanValue.length <= 6) {
-            return `(${cleanValue.slice(0, 3)}) ${cleanValue.slice(3)}`;
+            return `${cleanValue.slice(0, 4)} ${cleanValue.slice(4)}`;
         } else if (cleanValue.length <= 10) {
-            return `(${cleanValue.slice(0, 3)}) ${cleanValue.slice(3, 6)}-${cleanValue.slice(6)}`;
+            return `${cleanValue.slice(0, 4)} ${cleanValue.slice(4, 7)} ${cleanValue.slice(7)}`;
         } else {
-            return `(${cleanValue.slice(0, 3)}) ${cleanValue.slice(3, 6)}-${cleanValue.slice(6, 10)}`;
+            return `${cleanValue.slice(0, 4)} ${cleanValue.slice(4, 7)} ${cleanValue.slice(7, 11)}`;
         }
     };
 
@@ -386,13 +399,16 @@ export default function RegisterPage() {
         setIsLoading(true);
 
         try {
+            // Clean phone number before saving (remove spaces and formatting)
+            const cleanPhone = formData.phone.replace(/\D/g, '');
+
             const { user } = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
 
             const userData: UserData = {
                 firstName: formData.firstName.trim(),
                 lastName: formData.lastName.trim(),
                 email: formData.email,
-                phone: formData.phone,
+                phone: cleanPhone, // Save cleaned phone number
                 role: formData.email === ADMIN_EMAIL ? "admin" : formData.email === OWNER_EMAIL ? "owner" : "client",
                 emailVerified: false,
                 createdAt: new Date().toISOString(),
@@ -727,7 +743,7 @@ export default function RegisterPage() {
                                     <Input
                                         name="phone"
                                         type="tel"
-                                        placeholder="(123) 456-7890"
+                                        placeholder="0917 123 4567"
                                         value={formData.phone}
                                         onChange={(e) => handlePhoneChange(e.target.value)}
                                         required
@@ -738,6 +754,9 @@ export default function RegisterPage() {
                                     {formErrors.phone && (
                                         <p className="text-xs text-red-500">{formErrors.phone}</p>
                                     )}
+                                    <p className="text-xs text-muted-foreground">
+                                        Enter your Philippine mobile number (e.g., 0917 123 4567)
+                                    </p>
                                 </div>
 
                                 <div className="space-y-2">
