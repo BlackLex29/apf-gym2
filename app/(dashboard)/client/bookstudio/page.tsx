@@ -39,7 +39,7 @@ interface BookingRecord extends AppointmentFormData {
   createdAt: Timestamp;
   bookingReference: string;
   userId: string;
-  email: string; // DAGDAG: Email field
+  email: string;
 }
 
 interface UserData {
@@ -105,6 +105,7 @@ const BookStudioForm: React.FC = () => {
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
   const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
+  const [temporarilyReservedSlots, setTemporarilyReservedSlots] = useState<Set<string>>(new Set());
 
   // Load current user and their data
   useEffect(() => {
@@ -112,17 +113,14 @@ const BookStudioForm: React.FC = () => {
       if (user) {
         setCurrentUser(user);
         try {
-          // Fetch user data from Firestore
           const userDoc = await getDoc(doc(db, "users", user.uid));
           if (userDoc.exists()) {
             const userDataFromFirestore = userDoc.data() as UserData;
             setUserData(userDataFromFirestore);
 
-            // Pre-fill only the name, not the phone number
             setFormData((prev) => ({
               ...prev,
               name: `${userDataFromFirestore.firstName} ${userDataFromFirestore.lastName}`,
-              // Phone number is intentionally NOT pre-filled
             }));
           }
         } catch (error) {
@@ -144,7 +142,7 @@ const BookStudioForm: React.FC = () => {
     return activity.pricePerHour * formData.duration;
   };
 
-  // REAL-TIME availability monitoring for selected date - ONE SLOT AT A TIME
+  // REAL-TIME availability monitoring for selected date - 1 SLOT PER HOUR
   useEffect(() => {
     if (!formData.date) {
       setAvailableSlots(TIME_SLOTS);
@@ -154,7 +152,6 @@ const BookStudioForm: React.FC = () => {
 
     setIsCheckingAvailability(true);
 
-    // Set up real-time listener for bookings on the selected date
     const bookingsRef = collection(db, "bookings");
     const q = query(
       bookingsRef,
@@ -167,7 +164,7 @@ const BookStudioForm: React.FC = () => {
       
       querySnapshot.forEach((doc) => {
         const booking = doc.data() as BookingRecord;
-        // Each booking only occupies ONE time slot
+        // BINAGO: ISANG SLOT LANG PER BOOKING - hindi na base sa duration
         newBookedSlots.add(booking.timeSlot);
       });
 
@@ -175,13 +172,18 @@ const BookStudioForm: React.FC = () => {
       
       // Calculate available slots by filtering out booked ones
       const available = TIME_SLOTS.filter((slot) => !newBookedSlots.has(slot));
-      setAvailableSlots(available);
+      
+      // Remove temporarily reserved slots from available slots
+      const finalAvailableSlots = available.filter(slot => 
+        !temporarilyReservedSlots.has(slot)
+      );
+      
+      setAvailableSlots(finalAvailableSlots);
 
       // If current selected slot is no longer available, reset to first available slot
-      if (!available.includes(formData.timeSlot) && available.length > 0) {
-        setFormData((prev) => ({ ...prev, timeSlot: available[0] }));
-      } else if (available.length === 0) {
-        // No available slots, clear selection
+      if (!finalAvailableSlots.includes(formData.timeSlot) && finalAvailableSlots.length > 0) {
+        setFormData((prev) => ({ ...prev, timeSlot: finalAvailableSlots[0] }));
+      } else if (finalAvailableSlots.length === 0) {
         setFormData((prev) => ({ ...prev, timeSlot: "" }));
       }
 
@@ -191,9 +193,18 @@ const BookStudioForm: React.FC = () => {
       setIsCheckingAvailability(false);
     });
 
-    // Cleanup subscription on unmount or date change
     return () => unsubscribe();
-  }, [formData.date, formData.timeSlot]);
+  }, [formData.date, temporarilyReservedSlots]);
+
+  // BAGONG FUNCTION: Temporarily reserve slot when user selects a time
+  const handleTimeSlotSelect = (timeSlot: string) => {
+    // BINAGO: ISANG SLOT LANG ang irereserve
+    const slotsToReserve = new Set<string>();
+    slotsToReserve.add(timeSlot);
+    
+    setTemporarilyReservedSlots(slotsToReserve);
+    setFormData((prev) => ({ ...prev, timeSlot }));
+  };
 
   // Generate booking reference
   const generateBookingReference = (): string => {
@@ -205,10 +216,7 @@ const BookStudioForm: React.FC = () => {
 
   // Format phone number to 11 digits and prevent letters
   const formatPhoneNumber = (value: string): string => {
-    // Remove all non-digit characters
     const digits = value.replace(/\D/g, "");
-    
-    // Limit to 11 digits
     return digits.slice(0, 11);
   };
 
@@ -241,6 +249,9 @@ const BookStudioForm: React.FC = () => {
 
     if (name === "phone") {
       handlePhoneInput(value);
+    } else if (name === "timeSlot") {
+      // Use the new function for time slot selection
+      handleTimeSlotSelect(value);
     } else {
       const newValue =
         name === "duration" || name === "participants"
@@ -262,6 +273,7 @@ const BookStudioForm: React.FC = () => {
         <div class="text-left">
           <p class="mb-2"><strong>Booking Reference:</strong> ${bookingReference}</p>
           <p class="mb-2"><strong>Time Slot:</strong> ${timeSlot} on ${date}</p>
+          <p class="mb-2"><strong>Duration:</strong> ${formData.duration} hour${formData.duration > 1 ? 's' : ''}</p>
           <p class="mb-2"><strong>Total Amount:</strong> ₱${totalPrice}</p>
           <p class="mb-2"><strong>Status:</strong> <span class="text-yellow-600">Pending Confirmation</span></p>
           <p class="text-sm text-gray-600 mt-3">We will contact you within 24 hours to confirm your booking.</p>
@@ -277,7 +289,6 @@ const BookStudioForm: React.FC = () => {
       }
     }).then((result) => {
       if (result.isConfirmed) {
-        // Redirect to dashboard after successful booking
         window.location.href = "/client/dashboard";
       }
     });
@@ -321,29 +332,25 @@ const BookStudioForm: React.FC = () => {
     });
   };
 
-  // Handle form submission - ONE SLOT BOOKING
+  // Handle form submission - 1 SLOT PER HOUR
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Check if user is logged in
     if (!currentUser) {
       showLoginAlert();
       return;
     }
 
-    // Validate phone number
     if (formData.phone.length !== 11) {
       showErrorAlert("Please enter a valid 11-digit phone number");
       return;
     }
 
-    // Validate phone number starts with 09
     if (!formData.phone.startsWith('09')) {
       showErrorAlert("Phone number must start with '09'");
       return;
     }
 
-    // Validate date and time slot
     if (!formData.date) {
       showErrorAlert("Please select a date");
       return;
@@ -354,9 +361,11 @@ const BookStudioForm: React.FC = () => {
       return;
     }
 
-    // Check if selected slot is still available (real-time validation)
+    // Check if selected slot is still available
     if (bookedSlots.has(formData.timeSlot)) {
-      showErrorAlert("Sorry, this time slot was just booked. Please select another available slot.");
+      showErrorAlert("Sorry, this time slot was just booked by another user. Please select another available slot.");
+      // Clear temporary reservation
+      setTemporarilyReservedSlots(new Set());
       return;
     }
 
@@ -366,7 +375,6 @@ const BookStudioForm: React.FC = () => {
       const totalPrice = calculateTotalPrice();
       const bookingReference = generateBookingReference();
 
-      // DAGDAG: Include email in booking data
       const bookingData: Omit<BookingRecord, "id"> = {
         ...formData,
         totalPrice,
@@ -374,19 +382,43 @@ const BookStudioForm: React.FC = () => {
         createdAt: Timestamp.now(),
         bookingReference,
         userId: currentUser.uid,
-        email: currentUser.email || userData?.email || "", // Include email
+        email: currentUser.email || userData?.email || "",
       };
 
-      // Save to Firestore - ONE SLOT BOOKING
+      // Final availability check before saving
+      const finalCheckQuery = query(
+        collection(db, "bookings"),
+        where("date", "==", formData.date),
+        where("status", "in", ["pending", "confirmed"])
+      );
+      
+      const finalCheckSnapshot = await getDocs(finalCheckQuery);
+      const finalBookedSlots = new Set<string>();
+      
+      finalCheckSnapshot.forEach((doc) => {
+        const booking = doc.data() as BookingRecord;
+        // BINAGO: ISANG SLOT LANG ang iche-check
+        finalBookedSlots.add(booking.timeSlot);
+      });
+
+      // Check if our selected slot is still available
+      if (finalBookedSlots.has(formData.timeSlot)) {
+        showErrorAlert("Sorry, this time slot was just booked by another user. Please select another available slot.");
+        setTemporarilyReservedSlots(new Set());
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Save to Firestore
       const docRef = await addDoc(collection(db, "bookings"), bookingData);
 
-      // Show success alert with booking details
+      // Show success alert
       showSuccessAlert(bookingReference, totalPrice, formData.timeSlot, formData.date);
 
-      // Reset form but keep pre-filled user name only
+      // Reset form and clear temporary reservations
       setFormData({
         name: userData ? `${userData.firstName} ${userData.lastName}` : "",
-        phone: "", // Reset phone number
+        phone: "",
         activityType: "dance",
         date: "",
         timeSlot: TIME_SLOTS[0],
@@ -394,16 +426,18 @@ const BookStudioForm: React.FC = () => {
         participants: 1,
         specialRequests: "",
       });
+      setTemporarilyReservedSlots(new Set());
 
-      // Log to console (for demo)
-      console.log("Booking saved with ID:", docRef.id, bookingData);
-      console.log("✅ ONE SLOT BOOKING: ", formData.timeSlot, "on", formData.date);
-      console.log("📧 Email included:", bookingData.email);
-      console.log("👤 User ID:", bookingData.userId);
+      console.log("✅ BOOKING SUCCESSFUL - 1 SLOT RESERVED:");
+      console.log("Time Slot:", formData.timeSlot);
+      console.log("Duration:", formData.duration, "hours");
+      console.log("Booking Reference:", bookingReference);
       
     } catch (error) {
       console.error("Error saving booking:", error);
       showErrorAlert("Error booking appointment. Please try again.");
+      // Clear temporary reservation on error
+      setTemporarilyReservedSlots(new Set());
     } finally {
       setIsSubmitting(false);
     }
@@ -477,7 +511,7 @@ const BookStudioForm: React.FC = () => {
               </span>
             </p>
             <p className="text-sm text-muted-foreground mt-2">
-              Available time slots: 8:00 AM - 10:00 PM • One slot per booking
+              Available time slots: 8:00 AM - 10:00 PM • One slot per hour
             </p>
 
             {/* User Info Banner */}
@@ -505,9 +539,14 @@ const BookStudioForm: React.FC = () => {
                   <p className="text-sm text-blue-600">
                     {isCheckingAvailability 
                       ? "Checking latest availability..." 
-                      : `${availableSlots.length} slots available for ${formData.date}`
+                      : `${availableSlots.length} time slots available on ${formData.date}`
                     }
                   </p>
+                  {temporarilyReservedSlots.size > 0 && (
+                    <p className="text-sm text-orange-600 mt-1">
+                      ⚠️ <strong>Selected time slot is temporarily reserved</strong> - complete your booking within 5 minutes
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -690,80 +729,6 @@ const BookStudioForm: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Time Slot - ONE SLOT SELECTION */}
-                  <div className="space-y-2">
-                    <label
-                      htmlFor="timeSlot"
-                      className="block text-sm font-medium text-foreground"
-                    >
-                      Time Slot * (1 slot per booking)
-                    </label>
-                    <div className="relative">
-                      <select
-                        id="timeSlot"
-                        name="timeSlot"
-                        value={formData.timeSlot}
-                        onChange={handleInputChange}
-                        required
-                        disabled={availableSlots.length === 0 && formData.date !== ""}
-                        className="w-full px-4 py-3 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent appearance-none transition-all duration-200 disabled:bg-muted disabled:cursor-not-allowed text-foreground bg-background"
-                      >
-                        {formData.date ? (
-                          availableSlots.length > 0 ? (
-                            availableSlots.map((slot) => (
-                              <option
-                                key={slot}
-                                value={slot}
-                                className="text-foreground"
-                              >
-                                {slot}
-                              </option>
-                            ))
-                          ) : (
-                            <option value="" className="text-foreground">
-                              No available slots
-                            </option>
-                          )
-                        ) : (
-                          TIME_SLOTS.map((slot) => (
-                            <option
-                              key={slot}
-                              value={slot}
-                              className="text-foreground"
-                            >
-                              {slot}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-muted-foreground">
-                        <svg
-                          className="h-4 w-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M19 9l-7 7-7-7"
-                          ></path>
-                        </svg>
-                      </div>
-                    </div>
-                    {formData.date && availableSlots.length > 0 && (
-                      <p className="text-sm text-green-600 font-medium">
-                        {availableSlots.length} slots available • Real-time updates
-                      </p>
-                    )}
-                    {formData.date && availableSlots.length === 0 && (
-                      <p className="text-sm text-red-600">
-                        No available slots for this date
-                      </p>
-                    )}
-                  </div>
-
                   {/* Duration */}
                   <div className="space-y-2">
                     <label
@@ -808,6 +773,99 @@ const BookStudioForm: React.FC = () => {
                         </svg>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Time Slot - 1 SLOT PER HOUR */}
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="timeSlot"
+                      className="block text-sm font-medium text-foreground"
+                    >
+                      Time Slot * (1 slot per hour)
+                    </label>
+                    <div className="relative">
+                      <select
+                        id="timeSlot"
+                        name="timeSlot"
+                        value={formData.timeSlot}
+                        onChange={handleInputChange}
+                        required
+                        disabled={availableSlots.length === 0 && formData.date !== ""}
+                        className="w-full px-4 py-3 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent appearance-none transition-all duration-200 disabled:bg-muted disabled:cursor-not-allowed text-foreground bg-background"
+                      >
+                        {formData.date ? (
+                          availableSlots.length > 0 ? (
+                            availableSlots.map((slot) => {
+                              const isTemporarilyReserved = temporarilyReservedSlots.has(slot);
+                              
+                              return (
+                                <option
+                                  key={slot}
+                                  value={slot}
+                                  className="text-foreground"
+                                  disabled={isTemporarilyReserved && slot !== formData.timeSlot}
+                                >
+                                  {slot}
+                                  {isTemporarilyReserved && " 🔒 TEMPORARILY RESERVED"}
+                                </option>
+                              );
+                            })
+                          ) : (
+                            <option value="" className="text-foreground">
+                              No available time slots
+                            </option>
+                          )
+                        ) : (
+                          TIME_SLOTS.map((slot) => (
+                            <option
+                              key={slot}
+                              value={slot}
+                              className="text-foreground"
+                            >
+                              {slot}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-muted-foreground">
+                        <svg
+                          className="h-4 w-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M19 9l-7 7-7-7"
+                          ></path>
+                        </svg>
+                      </div>
+                    </div>
+                    {formData.date && availableSlots.length > 0 && (
+                      <p className="text-sm text-green-600 font-medium">
+                        {availableSlots.length} time slots available • One slot per hour
+                      </p>
+                    )}
+                    {formData.date && availableSlots.length === 0 && (
+                      <p className="text-sm text-red-600">
+                        No available time slots for this date
+                      </p>
+                    )}
+                    {temporarilyReservedSlots.size > 0 && (
+                      <div className="p-2 bg-orange-50 border border-orange-200 rounded text-xs">
+                        <p className="text-orange-800 font-medium">
+                          🔒 Temporarily Reserved Time Slot:
+                        </p>
+                        <p className="text-orange-700">
+                          {Array.from(temporarilyReservedSlots).join(', ')}
+                        </p>
+                        <p className="text-orange-600 mt-1">
+                          Complete your booking to permanently reserve this time slot
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Participants */}
@@ -926,7 +984,7 @@ const BookStudioForm: React.FC = () => {
               call <span className="text-primary">+63 917 123 4567</span>
             </p>
             <p className="mt-2 text-xs">
-              💡 <strong>One Slot System:</strong> Each booking occupies one time slot only
+              💡 <strong>One Slot Per Hour:</strong> Each booking reserves one time slot only, regardless of duration
             </p>
           </div>
         </div>

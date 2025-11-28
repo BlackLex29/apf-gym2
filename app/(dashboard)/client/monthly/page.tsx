@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import Swal from 'sweetalert2';
 
 // Type definitions - Matching ClientManagement interface
 type UserType = "regular" | "student";
@@ -64,6 +65,7 @@ interface MembershipRecord extends MembershipFormData {
   createdAt: Timestamp;
   paymentDate?: Timestamp | null;
   approvedBy?: string;
+  userId?: string;
 }
 
 interface UserData {
@@ -101,9 +103,16 @@ const MonthlyMembershipForm: React.FC = () => {
     MembershipRecord[]
   >([]);
   const [showGCashModal, setShowGCashModal] = useState(false);
+  const [monthlyLimitReached, setMonthlyLimitReached] = useState(false);
+  const [monthlyMembershipCount, setMonthlyMembershipCount] = useState(0);
+  const [userHasActiveMembership, setUserHasActiveMembership] = useState(false);
+  const [userActiveMembership, setUserActiveMembership] = useState<MembershipRecord | null>(null);
 
   // FIXED: Online payment configuration - SET TO FALSE IF NO ONLINE PAYMENTS
   const ONLINE_PAYMENTS_AVAILABLE = false; // CHANGE TO true IF YOU HAVE ONLINE PAYMENTS
+
+  // Monthly membership limit
+  const MONTHLY_MEMBERSHIP_LIMIT = 50; // Change this value as needed
 
   // GCash References and Instructions (only used if online payments available)
   const gcashReferences = {
@@ -118,6 +127,23 @@ const MonthlyMembershipForm: React.FC = () => {
       "Add your name in the remarks/message",
       "Take screenshot of transaction for verification",
     ],
+  };
+
+  // Phone number validation regex for Philippine numbers
+  const validatePhoneNumber = (phone: string): boolean => {
+    const phoneRegex = /^(09|\+639)\d{9}$/;
+    return phoneRegex.test(phone.replace(/\s+/g, ''));
+  };
+
+  // Format phone number for display
+  const formatPhoneNumber = (phone: string): string => {
+    const cleaned = phone.replace(/\D/g, '');
+    if (cleaned.startsWith('09') && cleaned.length === 11) {
+      return cleaned.replace(/(\d{4})(\d{3})(\d{4})/, '$1 $2 $3');
+    } else if (cleaned.startsWith('639') && cleaned.length === 12) {
+      return `+63 ${cleaned.slice(2, 5)} ${cleaned.slice(5, 8)} ${cleaned.slice(8)}`;
+    }
+    return phone;
   };
 
   // Load current user and their data
@@ -140,6 +166,9 @@ const MonthlyMembershipForm: React.FC = () => {
               email: userDataFromFirestore.email,
               phone: userDataFromFirestore.phone,
             }));
+
+            // Check if user already has active membership
+            await checkUserActiveMembership(user.uid);
           }
         } catch (error) {
           console.error("Error fetching user data:", error);
@@ -153,6 +182,103 @@ const MonthlyMembershipForm: React.FC = () => {
 
     return () => unsubscribe();
   }, []);
+
+  // Check if user already has active membership for current month
+  const checkUserActiveMembership = async (userId: string): Promise<boolean> => {
+    try {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      
+      const membershipsRef = collection(db, "monthlyMemberships");
+      const q = query(
+        membershipsRef,
+        where("userId", "==", userId),
+        where("createdAt", ">=", Timestamp.fromDate(startOfMonth)),
+        where("createdAt", "<=", Timestamp.fromDate(endOfMonth)),
+        where("status", "in", ["active", "pending", "payment_pending"])
+      );
+
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const activeMembership = { 
+          id: querySnapshot.docs[0].id, 
+          ...querySnapshot.docs[0].data() 
+        } as MembershipRecord;
+        
+        setUserHasActiveMembership(true);
+        setUserActiveMembership(activeMembership);
+        
+        // Show SweetAlert for existing membership
+        Swal.fire({
+          title: 'Existing Membership Found',
+          html: `
+            <div class="text-left">
+              <p>You already have an active membership for this month:</p>
+              <p><strong>Membership ID:</strong> ${activeMembership.membershipId}</p>
+              <p><strong>Status:</strong> ${activeMembership.status}</p>
+              <p><strong>Type:</strong> ${activeMembership.userType === 'regular' ? 'Regular' : 'Student'}</p>
+              <p class="mt-2 text-sm text-amber-600">You can only have one monthly membership per month.</p>
+            </div>
+          `,
+          icon: 'warning',
+          confirmButtonText: 'OK',
+          confirmButtonColor: '#3b82f6',
+        });
+        
+        return true;
+      }
+      
+      setUserHasActiveMembership(false);
+      setUserActiveMembership(null);
+      return false;
+    } catch (error) {
+      console.error("Error checking user membership:", error);
+      return false;
+    }
+  };
+
+  // Check monthly membership limit
+  const checkMonthlyLimit = async (): Promise<boolean> => {
+    try {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      
+      const membershipsRef = collection(db, "monthlyMemberships");
+      const q = query(
+        membershipsRef,
+        where("createdAt", ">=", Timestamp.fromDate(startOfMonth)),
+        where("createdAt", "<=", Timestamp.fromDate(endOfMonth))
+      );
+
+      const querySnapshot = await getDocs(q);
+      const count = querySnapshot.size;
+      setMonthlyMembershipCount(count);
+
+      if (count >= MONTHLY_MEMBERSHIP_LIMIT) {
+        setMonthlyLimitReached(true);
+        
+        // Show SweetAlert for monthly limit reached
+        Swal.fire({
+          title: 'Monthly Limit Reached',
+          text: `Sorry, we have reached our monthly membership limit of ${MONTHLY_MEMBERSHIP_LIMIT} for this month. Please try again next month.`,
+          icon: 'warning',
+          confirmButtonText: 'OK',
+          confirmButtonColor: '#3b82f6',
+        });
+        
+        return true;
+      }
+      
+      setMonthlyLimitReached(false);
+      return false;
+    } catch (error) {
+      console.error("Error checking monthly limit:", error);
+      return false;
+    }
+  };
 
   // Calculate monthly price based on user type
   const calculateMonthlyPrice = (): number => {
@@ -193,10 +319,20 @@ const MonthlyMembershipForm: React.FC = () => {
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    
+    if (name === "phone") {
+      // Format phone number as user types
+      const formattedPhone = formatPhoneNumber(value);
+      setFormData((prev) => ({
+        ...prev,
+        [name]: formattedPhone,
+      }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    }
   };
 
   const handleSelectChange = (name: string, value: string) => {
@@ -233,7 +369,71 @@ const MonthlyMembershipForm: React.FC = () => {
 
     // Check if user is logged in
     if (!currentUser) {
-      setSubmitMessage("❌ Please log in to apply for a membership.");
+      Swal.fire({
+        title: 'Login Required',
+        text: 'Please log in to apply for a membership.',
+        icon: 'warning',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#3b82f6',
+      });
+      return;
+    }
+
+    // Check if user already has active membership
+    if (userHasActiveMembership) {
+      Swal.fire({
+        title: 'Existing Membership',
+        html: `
+          <div class="text-left">
+            <p>You already have an active membership for this month:</p>
+            <p><strong>Membership ID:</strong> ${userActiveMembership?.membershipId}</p>
+            <p><strong>Status:</strong> ${userActiveMembership?.status}</p>
+            <p class="mt-2 text-amber-600">You can only have one monthly membership per month.</p>
+          </div>
+        `,
+        icon: 'warning',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#3b82f6',
+      });
+      return;
+    }
+
+    // Check monthly limit before proceeding
+    const limitReached = await checkMonthlyLimit();
+    if (limitReached) {
+      return;
+    }
+
+    // Phone number validation
+    if (!validatePhoneNumber(formData.phone)) {
+      Swal.fire({
+        title: 'Invalid Phone Number',
+        html: `
+          <div class="text-left">
+            <p>Please enter a valid Philippine mobile number format:</p>
+            <ul class="list-disc list-inside mt-2">
+              <li>09XX XXX XXXX (11 digits)</li>
+              <li>+63 XXX XXX XXXX (12 digits with country code)</li>
+            </ul>
+            <p class="mt-2 text-sm">Examples: 0917 123 4567 or +63 917 123 4567</p>
+          </div>
+        `,
+        icon: 'error',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#ef4444',
+      });
+      return;
+    }
+
+    // Emergency contact phone validation
+    if (!validatePhoneNumber(formData.emergencyPhone)) {
+      Swal.fire({
+        title: 'Invalid Emergency Phone Number',
+        text: 'Please enter a valid Philippine mobile number for emergency contact.',
+        icon: 'error',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#ef4444',
+      });
       return;
     }
 
@@ -246,7 +446,13 @@ const MonthlyMembershipForm: React.FC = () => {
       !formData.emergencyContact.trim() ||
       !formData.emergencyPhone.trim()
     ) {
-      setSubmitMessage("❌ Please fill in all required fields.");
+      Swal.fire({
+        title: 'Missing Information',
+        text: 'Please fill in all required fields.',
+        icon: 'error',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#ef4444',
+      });
       return;
     }
 
@@ -271,6 +477,7 @@ const MonthlyMembershipForm: React.FC = () => {
         status: initialStatus,
         createdAt: now,
         approvedBy: "",
+        userId: currentUser.uid, // Add user ID to track per user
       };
 
       // Remove undefined fields before saving
@@ -303,6 +510,23 @@ const MonthlyMembershipForm: React.FC = () => {
           : " Please proceed to the gym reception for cash payment."
         : " Please proceed to the gym reception for cash payment. Online payments are currently unavailable.";
 
+      // Show success SweetAlert
+      await Swal.fire({
+        title: 'Application Submitted!',
+        html: `
+          <div class="text-left">
+            <p><strong>Membership ID:</strong> ${membershipId}</p>
+            <p><strong>Amount:</strong> ₱${monthlyPrice}</p>
+            <p><strong>Valid From:</strong> ${formatDateForDisplay(startDate)}</p>
+            <p><strong>Valid Until:</strong> ${formatDateForDisplay(expiryDate)}</p>
+            <p class="mt-2">${paymentInstructions}</p>
+          </div>
+        `,
+        icon: 'success',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#10b981',
+      });
+
       setSubmitMessage(
         `✅ Monthly membership application submitted! ` +
           `Membership ID: ${membershipId}. ` +
@@ -325,10 +549,22 @@ const MonthlyMembershipForm: React.FC = () => {
         fitnessGoals: "",
       });
 
-      // Refresh memberships list
+      // Refresh memberships list and monthly count
       await loadActiveMemberships();
+      await checkMonthlyLimit();
+      await checkUserActiveMembership(currentUser.uid);
     } catch (error) {
       console.error("Error saving membership:", error);
+      
+      // Show error SweetAlert
+      Swal.fire({
+        title: 'Application Failed',
+        text: 'Error processing membership application. Please try again.',
+        icon: 'error',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#ef4444',
+      });
+
       setSubmitMessage(
         "❌ Error processing membership application. Please try again."
       );
@@ -368,10 +604,14 @@ const MonthlyMembershipForm: React.FC = () => {
 
   useEffect(() => {
     loadActiveMemberships();
+    checkMonthlyLimit();
   }, []);
 
   const monthlyPrice = calculateMonthlyPrice();
   const { startDate, expiryDate } = calculateMembershipDates();
+
+  // Check if form should be disabled
+  const isFormDisabled = monthlyLimitReached || userHasActiveMembership;
 
   // Show loading state while fetching user data
   if (isLoadingUser) {
@@ -410,6 +650,61 @@ const MonthlyMembershipForm: React.FC = () => {
 
   return (
     <div className="container mx-auto p-4 max-w-6xl">
+      {/* User Active Membership Alert */}
+      {userHasActiveMembership && userActiveMembership && (
+        <Alert className="mb-6 bg-blue-50 border-blue-200">
+          <AlertDescription>
+            <div className="flex justify-between items-center">
+              <div>
+                <strong>📋 Active Membership Found</strong>
+                <br />
+                You already have a {userActiveMembership.userType} membership for this month. 
+                Membership ID: {userActiveMembership.membershipId} (Status: {userActiveMembership.status})
+              </div>
+              <Badge variant="default" className="ml-2">
+                Already Registered
+              </Badge>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Monthly Limit Alert */}
+      {monthlyLimitReached && (
+        <Alert className="mb-6 bg-amber-50 border-amber-200">
+          <AlertDescription>
+            <strong>⚠️ Monthly Limit Reached</strong>
+            <br />
+            We have reached our monthly membership limit of {MONTHLY_MEMBERSHIP_LIMIT}. 
+            Please try again next month. Current count: {monthlyMembershipCount}/{MONTHLY_MEMBERSHIP_LIMIT}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Monthly Limit Counter */}
+      <div className="mb-6">
+        <Card className="bg-blue-50 border-blue-200">
+          <CardContent className="p-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-semibold text-blue-800">Monthly Membership Availability</h3>
+                <p className="text-sm text-blue-600">
+                  {MONTHLY_MEMBERSHIP_LIMIT - monthlyMembershipCount} spots remaining this month
+                </p>
+                {userHasActiveMembership && (
+                  <p className="text-sm text-green-600 font-medium mt-1">
+                    ✓ You have an active membership for this month
+                  </p>
+                )}
+              </div>
+              <Badge variant={monthlyLimitReached ? "destructive" : "default"} className="text-lg">
+                {monthlyMembershipCount}/{MONTHLY_MEMBERSHIP_LIMIT}
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* GCash Payment Modal - Only show if online payments available */}
       {ONLINE_PAYMENTS_AVAILABLE && showGCashModal && (
         <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -550,8 +845,9 @@ const MonthlyMembershipForm: React.FC = () => {
                 ${formData.userType === "regular" 
                   ? "ring-2 ring-primary bg-primary/5" 
                   : "hover:bg-accent/50"}
+                ${isFormDisabled ? 'opacity-50 cursor-not-allowed' : ''}
               `}
-              onClick={() => handleSelectChange("userType", "regular")}
+              onClick={() => !isFormDisabled && handleSelectChange("userType", "regular")}
             >
               <CardContent className="pt-6">
                 <div className="flex justify-between items-start mb-2">
@@ -571,6 +867,11 @@ const MonthlyMembershipForm: React.FC = () => {
                   <li>✅ Towel service</li>
                   <li>✅ Free fitness assessment</li>
                 </ul>
+                {isFormDisabled && (
+                  <div className="mt-3 p-2 bg-amber-100 text-amber-800 rounded text-xs text-center">
+                    {userHasActiveMembership ? 'Already have membership' : 'Monthly limit reached'}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -580,8 +881,9 @@ const MonthlyMembershipForm: React.FC = () => {
                 ${formData.userType === "student" 
                   ? "ring-2 ring-primary bg-primary/5" 
                   : "hover:bg-accent/50"}
+                ${isFormDisabled ? 'opacity-50 cursor-not-allowed' : ''}
               `}
-              onClick={() => handleSelectChange("userType", "student")}
+              onClick={() => !isFormDisabled && handleSelectChange("userType", "student")}
             >
               <CardContent className="pt-6">
                 <div className="flex justify-between items-start mb-2">
@@ -600,6 +902,11 @@ const MonthlyMembershipForm: React.FC = () => {
                   <li>✅ Student events</li>
                   <li>✅ Group workout sessions</li>
                 </ul>
+                {isFormDisabled && (
+                  <div className="mt-3 p-2 bg-amber-100 text-amber-800 rounded text-xs text-center">
+                    {userHasActiveMembership ? 'Already have membership' : 'Monthly limit reached'}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -636,6 +943,7 @@ const MonthlyMembershipForm: React.FC = () => {
                       onChange={handleInputChange}
                       required
                       placeholder="Enter your first name"
+                      disabled={isFormDisabled}
                     />
                   </div>
 
@@ -648,6 +956,7 @@ const MonthlyMembershipForm: React.FC = () => {
                       onChange={handleInputChange}
                       required
                       placeholder="Enter your last name"
+                      disabled={isFormDisabled}
                     />
                   </div>
 
@@ -661,6 +970,7 @@ const MonthlyMembershipForm: React.FC = () => {
                       onChange={handleInputChange}
                       required
                       placeholder="Enter your email address"
+                      disabled={isFormDisabled}
                     />
                   </div>
 
@@ -673,8 +983,17 @@ const MonthlyMembershipForm: React.FC = () => {
                       value={formData.phone}
                       onChange={handleInputChange}
                       required
-                      placeholder="Enter your phone number"
+                      placeholder="09XX XXX XXXX or +63 XXX XXX XXXX"
+                      disabled={isFormDisabled}
                     />
+                    {formData.phone && !validatePhoneNumber(formData.phone) && (
+                      <p className="text-xs text-red-500">
+                        Please enter a valid Philippine mobile number
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Format: 0917 123 4567 or +63 917 123 4567
+                    </p>
                   </div>
                 </div>
               </CardContent>
@@ -695,6 +1014,7 @@ const MonthlyMembershipForm: React.FC = () => {
                       value={formData.studentId}
                       onChange={handleInputChange}
                       placeholder="Enter your student ID"
+                      disabled={isFormDisabled}
                     />
                     <p className="text-xs text-muted-foreground">
                       Providing your student ID helps us verify your student status.
@@ -722,6 +1042,7 @@ const MonthlyMembershipForm: React.FC = () => {
                       onChange={handleInputChange}
                       required
                       placeholder="Full name of emergency contact"
+                      disabled={isFormDisabled}
                     />
                   </div>
 
@@ -736,8 +1057,14 @@ const MonthlyMembershipForm: React.FC = () => {
                       value={formData.emergencyPhone}
                       onChange={handleInputChange}
                       required
-                      placeholder="Emergency contact phone number"
+                      placeholder="09XX XXX XXXX or +63 XXX XXX XXXX"
+                      disabled={isFormDisabled}
                     />
+                    {formData.emergencyPhone && !validatePhoneNumber(formData.emergencyPhone) && (
+                      <p className="text-xs text-red-500">
+                        Please enter a valid Philippine mobile number
+                      </p>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -761,6 +1088,7 @@ const MonthlyMembershipForm: React.FC = () => {
                       onChange={handleInputChange}
                       placeholder="Please list any health conditions, allergies, or medications we should be aware of..."
                       rows={3}
+                      disabled={isFormDisabled}
                     />
                   </div>
 
@@ -775,6 +1103,7 @@ const MonthlyMembershipForm: React.FC = () => {
                       onChange={handleInputChange}
                       placeholder="What are your main fitness goals? (e.g., weight loss, muscle gain, endurance, etc.)"
                       rows={3}
+                      disabled={isFormDisabled}
                     />
                   </div>
                 </div>
@@ -795,8 +1124,9 @@ const MonthlyMembershipForm: React.FC = () => {
                     <Select
                       value={formData.paymentMethod}
                       onValueChange={(value: PaymentMethod) => 
-                        handleSelectChange("paymentMethod", value)
+                        !isFormDisabled && handleSelectChange("paymentMethod", value)
                       }
+                      disabled={isFormDisabled}
                     >
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Select payment method" />
@@ -962,16 +1292,24 @@ const MonthlyMembershipForm: React.FC = () => {
             <div className="text-center space-y-3">
               <Button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || isFormDisabled}
                 className="w-full md:w-auto px-8 py-3 text-lg"
                 size="lg"
               >
-                {isSubmitting
+                {userHasActiveMembership
+                  ? "Already Have Membership"
+                  : monthlyLimitReached
+                  ? "Monthly Limit Reached"
+                  : isSubmitting
                   ? "Processing..."
                   : `Apply for Membership - ₱${monthlyPrice}`}
               </Button>
               <p className="text-sm text-muted-foreground">
-                {!ONLINE_PAYMENTS_AVAILABLE
+                {userHasActiveMembership
+                  ? "You already have an active membership for this month. One membership per user per month only."
+                  : monthlyLimitReached
+                  ? `We've reached our monthly limit of ${MONTHLY_MEMBERSHIP_LIMIT} memberships. Please try again next month.`
+                  : !ONLINE_PAYMENTS_AVAILABLE
                   ? "Your membership will be activated upon cash payment at the gym."
                   : formData.paymentMethod === "gcash" ||
                     formData.paymentMethod === "bank_transfer"
