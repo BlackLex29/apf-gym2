@@ -103,6 +103,11 @@ const getOptimizedImageUrl = (
   return `${parts[0]}/upload/c_fill,w_${width},h_${height},q_auto,f_auto,g_auto/${parts[1]}`;
 };
 
+// Format currency function with proper peso sign
+const formatCurrency = (amount: number): string => {
+  return `₱${amount.toLocaleString('en-PH')}`;
+};
+
 const CoachContent = ({ coach }: { coach: Coach }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userData, setUserData] = useState<UserData | null>(null);
@@ -120,7 +125,7 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
   );
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<
     "cash" | "online"
-  >("online");
+  >("cash"); // Changed default to "cash"
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookingSubmitted, setBookingSubmitted] = useState(false);
   const [coachSchedules, setCoachSchedules] = useState<CoachSchedule[]>([]);
@@ -438,7 +443,7 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
           </div>
           <div className="text-center">
             <p className="text-2xl font-bold text-green-500">
-              {coach.specialty === "gym" ? "350" : "250"} PHP
+              {formatCurrency(coach.specialty === "gym" ? 350 : 250)}
             </p>
             <p className="text-muted-foreground">Per Session</p>
           </div>
@@ -590,7 +595,7 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
                 >
                   <div className="font-medium text-sm">{timeSlot.label}</div>
                   <div className="text-xs opacity-80 mt-1">
-                    {coach.specialty === "gym" ? "350 PHP" : "250 PHP"} per
+                    {formatCurrency(coach.specialty === "gym" ? 350 : 250)} per
                     session
                   </div>
                 </button>
@@ -619,7 +624,7 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
                     <span>{session.time}</span>
                   </div>
                   <span className="font-medium">
-                    {coach.specialty === "gym" ? "350" : "250"} PHP
+                    {formatCurrency(coach.specialty === "gym" ? 350 : 250)}
                   </span>
                 </div>
               ))}
@@ -632,7 +637,7 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
               <div className="flex justify-between">
                 <span>Total Price:</span>
                 <span className="font-bold text-orange-500 text-lg">
-                  {calculateTotalPrice()} PHP
+                  {formatCurrency(calculateTotalPrice())}
                 </span>
               </div>
             </div>
@@ -650,18 +655,14 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
                   : "bg-background border-border hover:bg-green-50 dark:hover:bg-green-900/20"
               }`}
             >
-              <DollarSign className="w-5 h-5" />
-              <span className="font-medium">Pay now</span>
+              < div className="w-5 h-5" />
+              <span className="font-medium"> ₱ Pay now</span>
             </button>
           </div>
         </div>
 
         <button
-          onClick={
-            selectedPaymentMethod === "online"
-              ? handleOnlinePayment
-              : handleSubmitBooking
-          }
+          onClick={handleSubmitBooking} // Always use handleSubmitBooking since we only have cash payment
           disabled={isSubmitting || selectedSessions.length === 0}
           className={`w-full py-4 rounded-lg font-semibold transition text-lg ${
             isSubmitting || selectedSessions.length === 0
@@ -673,7 +674,7 @@ const CoachContent = ({ coach }: { coach: Coach }) => {
             ? "Processing..."
             : selectedSessions.length === 0
               ? "Select a Session to Book"
-              : `Book Session - ${calculateTotalPrice()} PHP`}
+              : `Book Session - ${formatCurrency(calculateTotalPrice())}`}
         </button>
       </div>
     </div>
@@ -905,8 +906,7 @@ const BookingStatusSection = () => {
                     </h3>
                     <p className="text-sm text-muted-foreground">
                       {booking.totalSessions} session
-                      {booking.totalSessions !== 1 ? "s" : ""} • ₱
-                      {booking.totalPrice}
+                      {booking.totalSessions !== 1 ? "s" : ""} • {formatCurrency(booking.totalPrice)}
                     </p>
                   </div>
                   <div
