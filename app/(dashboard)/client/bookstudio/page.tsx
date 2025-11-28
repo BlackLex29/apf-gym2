@@ -9,6 +9,7 @@ import {
   Timestamp,
   doc,
   getDoc,
+  onSnapshot,
 } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
@@ -37,6 +38,8 @@ interface BookingRecord extends AppointmentFormData {
   status: BookingStatus;
   createdAt: Timestamp;
   bookingReference: string;
+  userId: string;
+  email: string; // DAGDAG: Email field
 }
 
 interface UserData {
@@ -49,20 +52,12 @@ interface UserData {
   createdAt: string;
 }
 
-// Available time slots
+// Available time slots - UP TO 10 PM
 const TIME_SLOTS: TimeSlot[] = [
-  "08:00 AM",
-  "09:00 AM",
-  "10:00 AM",
-  "11:00 AM",
-  "12:00 PM",
-  "01:00 PM",
-  "02:00 PM",
-  "03:00 PM",
-  "04:00 PM",
-  "05:00 PM",
-  "06:00 PM",
-  "07:00 PM",
+  "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", 
+  "12:00 PM", "01:00 PM", "02:00 PM", "03:00 PM", 
+  "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM",
+  "08:00 PM", "09:00 PM", "10:00 PM"
 ];
 
 // Activity configurations with pricing
@@ -107,8 +102,8 @@ const BookStudioForm: React.FC = () => {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitMessage, setSubmitMessage] = useState("");
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
   const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
 
   // Load current user and their data
@@ -149,44 +144,56 @@ const BookStudioForm: React.FC = () => {
     return activity.pricePerHour * formData.duration;
   };
 
-  // Check availability for selected date
-  const checkAvailability = useCallback(
-    async (date: string) => {
-      if (!date) return;
+  // REAL-TIME availability monitoring for selected date - ONE SLOT AT A TIME
+  useEffect(() => {
+    if (!formData.date) {
+      setAvailableSlots(TIME_SLOTS);
+      setBookedSlots(new Set());
+      return;
+    }
 
-      setIsCheckingAvailability(true);
-      try {
-        const bookingsRef = collection(db, "bookings");
-        const q = query(
-          bookingsRef,
-          where("date", "==", date),
-          where("status", "in", ["pending", "confirmed"])
-        );
+    setIsCheckingAvailability(true);
 
-        const querySnapshot = await getDocs(q);
-        const bookedSlots = new Set<string>();
+    // Set up real-time listener for bookings on the selected date
+    const bookingsRef = collection(db, "bookings");
+    const q = query(
+      bookingsRef,
+      where("date", "==", formData.date),
+      where("status", "in", ["pending", "confirmed"])
+    );
 
-        querySnapshot.forEach((doc) => {
-          const booking = doc.data() as BookingRecord;
-          bookedSlots.add(booking.timeSlot);
-        });
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const newBookedSlots = new Set<string>();
+      
+      querySnapshot.forEach((doc) => {
+        const booking = doc.data() as BookingRecord;
+        // Each booking only occupies ONE time slot
+        newBookedSlots.add(booking.timeSlot);
+      });
 
-        const available = TIME_SLOTS.filter((slot) => !bookedSlots.has(slot));
-        setAvailableSlots(available);
+      setBookedSlots(newBookedSlots);
+      
+      // Calculate available slots by filtering out booked ones
+      const available = TIME_SLOTS.filter((slot) => !newBookedSlots.has(slot));
+      setAvailableSlots(available);
 
-        // If current selected slot is not available, reset to first available slot
-        if (!available.includes(formData.timeSlot) && available.length > 0) {
-          setFormData((prev) => ({ ...prev, timeSlot: available[0] }));
-        }
-      } catch (error) {
-        console.error("Error checking availability:", error);
-        setAvailableSlots(TIME_SLOTS); // Fallback to all slots
-      } finally {
-        setIsCheckingAvailability(false);
+      // If current selected slot is no longer available, reset to first available slot
+      if (!available.includes(formData.timeSlot) && available.length > 0) {
+        setFormData((prev) => ({ ...prev, timeSlot: available[0] }));
+      } else if (available.length === 0) {
+        // No available slots, clear selection
+        setFormData((prev) => ({ ...prev, timeSlot: "" }));
       }
-    },
-    [formData.timeSlot]
-  );
+
+      setIsCheckingAvailability(false);
+    }, (error) => {
+      console.error("Error in real-time availability:", error);
+      setIsCheckingAvailability(false);
+    });
+
+    // Cleanup subscription on unmount or date change
+    return () => unsubscribe();
+  }, [formData.date, formData.timeSlot]);
 
   // Generate booking reference
   const generateBookingReference = (): string => {
@@ -244,32 +251,34 @@ const BookStudioForm: React.FC = () => {
         ...prev,
         [name]: newValue,
       }));
-
-      // Check availability when date changes
-      if (name === "date") {
-        checkAvailability(value);
-      }
     }
   };
 
   // Show success SweetAlert
-  const showSuccessAlert = (bookingReference: string, totalPrice: number) => {
+  const showSuccessAlert = (bookingReference: string, totalPrice: number, timeSlot: string, date: string) => {
     Swal.fire({
       title: '🎉 Booking Successful!',
       html: `
         <div class="text-left">
           <p class="mb-2"><strong>Booking Reference:</strong> ${bookingReference}</p>
+          <p class="mb-2"><strong>Time Slot:</strong> ${timeSlot} on ${date}</p>
           <p class="mb-2"><strong>Total Amount:</strong> ₱${totalPrice}</p>
           <p class="mb-2"><strong>Status:</strong> <span class="text-yellow-600">Pending Confirmation</span></p>
           <p class="text-sm text-gray-600 mt-3">We will contact you within 24 hours to confirm your booking.</p>
+          <p class="text-sm text-green-600 mt-2">✅ Your booking will appear in your dashboard shortly.</p>
         </div>
       `,
       icon: 'success',
-      confirmButtonText: 'Great!',
+      confirmButtonText: 'View Dashboard',
       confirmButtonColor: '#10B981',
       customClass: {
         popup: 'rounded-lg',
         confirmButton: 'px-6 py-2 rounded-lg'
+      }
+    }).then((result) => {
+      if (result.isConfirmed) {
+        // Redirect to dashboard after successful booking
+        window.location.href = "/client/dashboard";
       }
     });
   };
@@ -312,6 +321,7 @@ const BookStudioForm: React.FC = () => {
     });
   };
 
+  // Handle form submission - ONE SLOT BOOKING
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -333,25 +343,45 @@ const BookStudioForm: React.FC = () => {
       return;
     }
 
+    // Validate date and time slot
+    if (!formData.date) {
+      showErrorAlert("Please select a date");
+      return;
+    }
+
+    if (!formData.timeSlot) {
+      showErrorAlert("Please select an available time slot");
+      return;
+    }
+
+    // Check if selected slot is still available (real-time validation)
+    if (bookedSlots.has(formData.timeSlot)) {
+      showErrorAlert("Sorry, this time slot was just booked. Please select another available slot.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       const totalPrice = calculateTotalPrice();
       const bookingReference = generateBookingReference();
 
+      // DAGDAG: Include email in booking data
       const bookingData: Omit<BookingRecord, "id"> = {
         ...formData,
         totalPrice,
         status: "pending" as BookingStatus,
         createdAt: Timestamp.now(),
         bookingReference,
+        userId: currentUser.uid,
+        email: currentUser.email || userData?.email || "", // Include email
       };
 
-      // Save to Firestore
+      // Save to Firestore - ONE SLOT BOOKING
       const docRef = await addDoc(collection(db, "bookings"), bookingData);
 
-      // Show success alert
-      showSuccessAlert(bookingReference, totalPrice);
+      // Show success alert with booking details
+      showSuccessAlert(bookingReference, totalPrice, formData.timeSlot, formData.date);
 
       // Reset form but keep pre-filled user name only
       setFormData({
@@ -364,15 +394,16 @@ const BookStudioForm: React.FC = () => {
         participants: 1,
         specialRequests: "",
       });
-      setAvailableSlots([]);
-      setSubmitMessage("");
 
       // Log to console (for demo)
       console.log("Booking saved with ID:", docRef.id, bookingData);
+      console.log("✅ ONE SLOT BOOKING: ", formData.timeSlot, "on", formData.date);
+      console.log("📧 Email included:", bookingData.email);
+      console.log("👤 User ID:", bookingData.userId);
+      
     } catch (error) {
       console.error("Error saving booking:", error);
       showErrorAlert("Error booking appointment. Please try again.");
-      setSubmitMessage("");
     } finally {
       setIsSubmitting(false);
     }
@@ -391,13 +422,6 @@ const BookStudioForm: React.FC = () => {
 
   const currentActivity = ACTIVITIES[formData.activityType];
   const totalPrice = calculateTotalPrice();
-
-  // Initialize availability check when component mounts or date changes
-  useEffect(() => {
-    if (formData.date) {
-      checkAvailability(formData.date);
-    }
-  }, [formData.date, checkAvailability]);
 
   // Show loading state while fetching user data
   if (isLoadingUser) {
@@ -452,6 +476,9 @@ const BookStudioForm: React.FC = () => {
                 ₱350 per hour
               </span>
             </p>
+            <p className="text-sm text-muted-foreground mt-2">
+              Available time slots: 8:00 AM - 10:00 PM • One slot per booking
+            </p>
 
             {/* User Info Banner */}
             {userData && (
@@ -468,20 +495,20 @@ const BookStudioForm: React.FC = () => {
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
-          {/* Success/Error Message */}
-          {submitMessage && (
-            <div
-              className={`mb-6 p-4 rounded-lg border ${
-                submitMessage.includes("✅")
-                  ? "bg-green-50 border-green-200 text-green-800"
-                  : "bg-red-50 border-red-200 text-red-800"
-              }`}
-            >
+          {/* Real-time Availability Indicator */}
+          {formData.date && (
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center">
-                <span className="text-lg mr-2">
-                  {submitMessage.includes("✅") ? "✅" : "❌"}
-                </span>
-                <span className="font-medium">{submitMessage}</span>
+                <span className="text-blue-600 text-lg mr-2">🔄</span>
+                <div>
+                  <p className="font-medium text-blue-800">Real-time Availability</p>
+                  <p className="text-sm text-blue-600">
+                    {isCheckingAvailability 
+                      ? "Checking latest availability..." 
+                      : `${availableSlots.length} slots available for ${formData.date}`
+                    }
+                  </p>
+                </div>
               </div>
             </div>
           )}
@@ -663,13 +690,13 @@ const BookStudioForm: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Time Slot */}
+                  {/* Time Slot - ONE SLOT SELECTION */}
                   <div className="space-y-2">
                     <label
                       htmlFor="timeSlot"
                       className="block text-sm font-medium text-foreground"
                     >
-                      Time Slot *
+                      Time Slot * (1 slot per booking)
                     </label>
                     <div className="relative">
                       <select
@@ -678,9 +705,7 @@ const BookStudioForm: React.FC = () => {
                         value={formData.timeSlot}
                         onChange={handleInputChange}
                         required
-                        disabled={
-                          availableSlots.length === 0 && formData.date !== ""
-                        }
+                        disabled={availableSlots.length === 0 && formData.date !== ""}
                         className="w-full px-4 py-3 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent appearance-none transition-all duration-200 disabled:bg-muted disabled:cursor-not-allowed text-foreground bg-background"
                       >
                         {formData.date ? (
@@ -729,7 +754,7 @@ const BookStudioForm: React.FC = () => {
                     </div>
                     {formData.date && availableSlots.length > 0 && (
                       <p className="text-sm text-green-600 font-medium">
-                        {availableSlots.length} slots available
+                        {availableSlots.length} slots available • Real-time updates
                       </p>
                     )}
                     {formData.date && availableSlots.length === 0 && (
@@ -875,7 +900,8 @@ const BookStudioForm: React.FC = () => {
                     isSubmitting ||
                     (formData.date && availableSlots.length === 0) ||
                     formData.phone.length !== 11 ||
-                    !formData.phone.startsWith('09')
+                    !formData.phone.startsWith('09') ||
+                    !formData.timeSlot
                   }
                   className="w-full lg:w-auto px-8 py-4 bg-primary text-primary-foreground font-semibold rounded-lg hover:bg-primary/90 transform hover:scale-105 transition-all duration-200 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed disabled:transform-none text-lg"
                 >
@@ -898,6 +924,9 @@ const BookStudioForm: React.FC = () => {
               Need help? Contact us at{" "}
               <span className="text-primary">support@gymschedpro.com</span> or
               call <span className="text-primary">+63 917 123 4567</span>
+            </p>
+            <p className="mt-2 text-xs">
+              💡 <strong>One Slot System:</strong> Each booking occupies one time slot only
             </p>
           </div>
         </div>
